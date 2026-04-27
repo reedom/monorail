@@ -2,7 +2,7 @@
 
 - **Date**: 2026-04-27
 - **Status**: Draft (post-brainstorming)
-- **Repo (working dir)**: `arail` (project name was renamed to `monorail` mid-brainstorm; directory rename TBD)
+- **Repo (working dir)**: `monorail`
 
 > Naming note: All repository identifiers in this document use placeholder
 > names (`acme/core-api`, `acme/web-app`, `acme/proto-schema`, etc.) and the
@@ -220,6 +220,25 @@ Both modes share the same pipeline implementation. The difference is whether
 the **Triager** is active: `daemon` polls Linear and ingests new tickets;
 `run <TICKET>` does not poll — it accepts the ticket key, materializes the
 Job once, drives it to a terminal state, and exits.
+
+### 4.3 External tool dependencies
+
+monorail is deliberately **not** a reimplementation of git, GitHub, or
+worktree management. It shells out to mature CLIs. All of the following
+must be present and authenticated in any environment monorail runs in
+(daemon container, local install):
+
+| Tool | Used for | Required |
+|---|---|---|
+| `git` | git operations not covered by `wt` | yes |
+| `gh` (GitHub CLI) | PR open, PR comment, CI status / logs, merge | yes |
+| `ghq` | resolving `<org>/<repo>` → local path, lazy clone | yes |
+| `wt` (worktrunk) | per-job worktree create/remove with conventions | yes |
+| `claude` (Claude Code CLI) | first-class Engine adapter | yes (for `ClaudeCodeAdapter`) |
+
+If any required tool is missing or not authenticated at startup, monorail
+fails fast with an actionable message naming the missing tool. The
+container image bakes them all in (§11.1).
 
 ## 5. Repository and Worktree Conventions
 
@@ -627,27 +646,41 @@ a repo is `waiting`.
 
 ## 13. Configuration Files
 
-### 13.1 Per-repo `monorail.toml`
+### 13.1 Per-repo configuration — convention-based, no `monorail.toml`
 
-Committed to each repo's root. Persistent settings only.
+monorail does **not** require a per-repo config file. Encoding `verify` /
+`build` / `test` / `lint` commands as a single block per repo does not fit
+reality: many of monorail's target repositories are themselves monorepos
+with many sub-projects, each with its own toolchain. A flat per-repo command
+table would be wrong for half the cases.
 
-```toml
-[engine]
-preferred = "claude-code"          # or "codex", etc.
+Instead, the Engine adapter discovers what to run by reading what the repo
+already documents for AI agents. In priority order:
 
-[verify]
-build = "cargo build"
-test = "cargo test"
-lint = "cargo clippy -- -D warnings"
-fmt_check = "cargo fmt --check"
+1. **AI-facing entry docs**: `CLAUDE.md`, `AGENTS.md` (root), and any
+   `docs/ai/*` index conventions (e.g., the layered structure from the
+   aidocs design principles: entry → repo-map → service-map).
+2. **Architecture / overview docs**: `docs/OVERVIEW.md`,
+   `docs/ARCHITECTURE.md`, `docs/architecture/*`.
+3. **Build signal files**: `package.json`, `Makefile`, `Cargo.toml`,
+   `pnpm-workspace.yaml`, `pyproject.toml`, `go.mod`, `Justfile`, etc. —
+   used to confirm the stack and likely commands.
+4. **Convention overrides** (optional, all under `.monorail/` if present):
+   - `.monorail/prompts/plan.md`        — extra context for planning phase
+   - `.monorail/prompts/review.md`      — extra context for self-review
+   - `.monorail/prompts/lint-test.md`   — extra context for lint/test loop
+   - `.monorail/prompts/ci-fix.md`      — extra context for CI-fix loop
+   - `.monorail/skills/<name>.md`       — repo-local skill files surfaced
+                                          to the engine
 
-[review]
-skill = "/pr-review-toolkit:review-pr"
+The override files are plain markdown; the Engine adapter prepends them to
+its phase prompt when present. This keeps the contract simple: the repo
+either has nothing (engine figures it out from AI-facing docs) or has
+prompt files that add specific guidance.
 
-[paths]
-docs_dir = "docs"
-schema_dir = "docs-schema"
-```
+Engine choice and concurrency are **operator concerns**, not repo concerns,
+so they belong in the global config (§13.2), not here. There is no
+`[engine] preferred` knob per repo.
 
 ### 13.2 Global `~/.config/monorail/config.toml`
 
@@ -671,8 +704,9 @@ state_db = "~/.local/share/monorail/state.db"
 log_dir = "~/.local/state/monorail/logs"
 ```
 
-monorail.toml is created by humans (one-time, like CI config). Ticket-specific
-plans are NEVER stored here — they live in the Linear ticket body.
+The global config is the only TOML monorail reads. Ticket-specific plans
+live in the Linear ticket body (§6.2). Per-repo overrides live in
+`.monorail/prompts/*.md` files inside the repo (§13.1).
 
 ## 14. Testing Strategy
 
