@@ -1,6 +1,7 @@
 mod cli;
 mod domain;
 mod error;
+mod state;
 mod tracing_setup;
 
 use clap::Parser;
