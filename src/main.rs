@@ -2,6 +2,7 @@ mod channel;
 mod cli;
 mod domain;
 mod engine;
+mod escalate;
 mod error;
 mod linear;
 mod pipeline;
