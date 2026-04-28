@@ -9,13 +9,16 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Run { ticket: String },
+    Run {
+        #[arg(help = "Jira/Linear ticket key, e.g. ACM-123")]
+        ticket: String,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
+    use clap::error::ErrorKind;
 
     #[test]
     fn parses_run_subcommand() {
@@ -28,7 +31,6 @@ mod tests {
     #[test]
     fn rejects_missing_ticket() {
         let err = Cli::try_parse_from(["monorail", "run"]).unwrap_err();
-        let s = err.to_string();
-        assert!(s.contains("required"), "got: {s}");
+        assert_eq!(err.kind(), ErrorKind::MissingRequiredArgument);
     }
 }
