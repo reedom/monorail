@@ -1,6 +1,7 @@
 mod cli;
 mod domain;
 mod error;
+mod linear;
 mod state;
 mod tracing_setup;
 
