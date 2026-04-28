@@ -4,6 +4,7 @@ mod domain;
 mod engine;
 mod error;
 mod linear;
+mod pipeline;
 mod state;
 mod tools;
 mod tracing_setup;
