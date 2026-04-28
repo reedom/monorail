@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "kebab-case")]
 pub enum Phase {
     Pending,
+    Planning,
     Implementing,
     SelfReviewing,
     LintTesting,
@@ -63,5 +64,11 @@ mod tests {
     fn work_type_parses_bug() {
         let w: WorkType = serde_json::from_str("\"bug\"").unwrap();
         assert_eq!(w, WorkType::Bug);
+    }
+
+    #[test]
+    fn planning_serializes_kebab_case() {
+        let s = serde_json::to_string(&Phase::Planning).unwrap();
+        assert_eq!(s, "\"planning\"");
     }
 }
