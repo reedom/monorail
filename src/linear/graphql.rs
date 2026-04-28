@@ -7,6 +7,7 @@ query Issue($key: String!) {
     description
     labels { nodes { id name } }
     state { id name type }
+    team { id }
   }
 }"#;
 

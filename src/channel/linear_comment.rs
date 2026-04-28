@@ -40,7 +40,8 @@ mod tests {
                     "id": "iss-1", "identifier": "ACM-1", "title": "t",
                     "description": null,
                     "labels": { "nodes": [] },
-                    "state": {"id":"s","name":"Backlog","type":"backlog"}
+                    "state": {"id":"s","name":"Backlog","type":"backlog"},
+                    "team": {"id":"team-1"}
                 },
                 "commentCreate": {
                     "success": true,

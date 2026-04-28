@@ -59,6 +59,7 @@ impl LinearClient {
             description: issue.description,
             labels: issue.labels.nodes,
             state: issue.state,
+            team_id: issue.team.id,
         })
     }
 
@@ -108,11 +109,17 @@ struct IssueRaw {
     description: Option<String>,
     labels: LabelsRaw,
     state: WorkflowState,
+    team: TeamRaw,
 }
 
 #[derive(Debug, Deserialize)]
 struct LabelsRaw {
     nodes: Vec<Label>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TeamRaw {
+    id: String,
 }
 
 #[cfg(test)]
@@ -130,7 +137,8 @@ mod tests {
                     "id": "abc", "identifier": "ACM-1", "title": "fix",
                     "description": null,
                     "labels": { "nodes": [{"id":"l","name":"monorail:type/bug"}] },
-                    "state": {"id":"s","name":"Backlog","type":"backlog"}
+                    "state": {"id":"s","name":"Backlog","type":"backlog"},
+                    "team": {"id":"team-1"}
                 }
             }
         });

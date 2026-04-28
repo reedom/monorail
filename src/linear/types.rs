@@ -10,6 +10,7 @@ pub struct Issue {
     #[serde(default)]
     pub labels: Vec<Label>,
     pub state: WorkflowState,
+    pub team_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -46,7 +47,8 @@ mod tests {
             "labels": [
               {"id":"l1","name":"monorail:type/bug"}
             ],
-            "state": {"id":"s1","name":"Backlog","type":"backlog"}
+            "state": {"id":"s1","name":"Backlog","type":"backlog"},
+            "team_id": "team-1"
         }"#;
         let issue: Issue = serde_json::from_str(s).unwrap();
         assert_eq!(issue.identifier, "ACM-1");
