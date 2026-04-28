@@ -56,7 +56,9 @@ pub async fn run_type_a<E: Engine + ?Sized, V: Verifier + ?Sized, G: GhTool + ?S
 
     match run_self_review(args.state, args.engine, args.ticket, args.repo_task_id, args.worktree).await? {
         SelfReviewOutcome::Clean => {}
-        SelfReviewOutcome::Stuck => {}
+        SelfReviewOutcome::Stuck => {
+            args.state.append_event(args.ticket, "review_stuck_proceed", &serde_json::json!({})).await?;
+        }
         SelfReviewOutcome::Escalated(r) => {
             escalate(args.state, args.channel, args.ticket, args.repo_task_id, r, "self-review maxed").await?;
             return Ok(TypeARunOutcome::Escalated(r));
