@@ -1,3 +1,4 @@
+mod channel;
 mod cli;
 mod domain;
 mod engine;
