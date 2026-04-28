@@ -7,6 +7,7 @@ mod linear;
 mod state;
 mod tools;
 mod tracing_setup;
+mod triager;
 
 use clap::Parser;
 use cli::{Cli, Command};
