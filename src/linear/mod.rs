@@ -1,6 +1,8 @@
 pub mod graphql;
+pub mod state_resolver;
 pub mod types;
 
+pub use state_resolver::{LinearStateResolver, StateKind};
 pub use types::{Comment, Issue, Label, WorkflowState};
 
 use crate::error::{MonorailError, Result};
