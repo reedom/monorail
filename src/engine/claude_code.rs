@@ -19,8 +19,19 @@ impl Default for ClaudeCodeAdapter {
 
 impl ClaudeCodeAdapter {
     async fn run(&self, cwd: &Path, prompt: &str) -> Result<String> {
+        // TEMP: blanket bypass-permissions while running headless. Replace with
+        // a proper allowlist via .claude/settings.json once skill-first
+        // architecture lands. Tracked as roadmap row `engine-permission-policy`
+        // (depends on `daemon-skill-contract`); do not merge to main as-is.
         let out = Command::new(&self.binary)
-            .args(["-p", prompt, "--output-format", "text"])
+            .args([
+                "-p",
+                prompt,
+                "--output-format",
+                "text",
+                "--permission-mode",
+                "bypassPermissions",
+            ])
             .current_dir(cwd)
             .output().await?;
         if !out.status.success() {
