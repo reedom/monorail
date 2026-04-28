@@ -23,9 +23,13 @@ pub struct LinearStateResolver {
 
 impl LinearStateResolver {
     pub fn from_states(states: Vec<WorkflowState>) -> Self {
-        let started = states.iter().find(|s| s.kind == "started").cloned();
-        let completed = states.iter().find(|s| s.kind == "completed").cloned();
-        Self { started, completed }
+        // For each kind we care about, pick the state with the lowest `position`
+        // — same rule Linear's UI uses to order states within a kind group.
+        // Missing positions sort last; ties preserve input order.
+        Self {
+            started: lowest_position(&states, "started"),
+            completed: lowest_position(&states, "completed"),
+        }
     }
 
     pub fn for_kind(&self, kind: StateKind) -> Option<&WorkflowState> {
@@ -36,15 +40,32 @@ impl LinearStateResolver {
     }
 }
 
+fn lowest_position(states: &[WorkflowState], kind: &str) -> Option<WorkflowState> {
+    states
+        .iter()
+        .filter(|s| s.kind == kind)
+        .min_by(|a, b| {
+            let ap = a.position.unwrap_or(f64::INFINITY);
+            let bp = b.position.unwrap_or(f64::INFINITY);
+            ap.total_cmp(&bp)
+        })
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn ws(id: &str, name: &str, kind: &str) -> WorkflowState {
+        ws_at(id, name, kind, None)
+    }
+
+    fn ws_at(id: &str, name: &str, kind: &str, position: Option<f64>) -> WorkflowState {
         WorkflowState {
             id: id.into(),
             name: name.into(),
             kind: kind.into(),
+            position,
         }
     }
 
@@ -57,6 +78,21 @@ mod tests {
             ws("s4", "Done", "completed"),
         ]);
         assert_eq!(r.for_kind(StateKind::Started).unwrap().id, "s2");
+        assert_eq!(r.for_kind(StateKind::Completed).unwrap().id, "s4");
+    }
+
+    #[test]
+    fn position_orders_states_when_input_order_disagrees() {
+        // Mirrors what Linear's API actually returned for reedom's workspace:
+        // "In Review" came before "In Progress" in the response, but
+        // "In Progress" has the lower position and is what the UI shows first.
+        let r = LinearStateResolver::from_states(vec![
+            ws_at("s1", "In Review", "started", Some(4.0)),
+            ws_at("s2", "Todo", "unstarted", Some(2.0)),
+            ws_at("s3", "In Progress", "started", Some(3.0)),
+            ws_at("s4", "Done", "completed", Some(5.0)),
+        ]);
+        assert_eq!(r.for_kind(StateKind::Started).unwrap().id, "s3");
         assert_eq!(r.for_kind(StateKind::Completed).unwrap().id, "s4");
     }
 
