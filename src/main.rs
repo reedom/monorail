@@ -1,8 +1,17 @@
+mod cli;
 mod error;
 mod tracing_setup;
 
+use clap::Parser;
+use cli::{Cli, Command};
+
 fn main() -> anyhow::Result<()> {
     tracing_setup::init();
-    tracing::info!("monorail starting");
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Run { ticket } => {
+            tracing::info!(ticket, "run subcommand invoked (stub)");
+        }
+    }
     Ok(())
 }
