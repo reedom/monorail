@@ -3,6 +3,7 @@ mod domain;
 mod error;
 mod linear;
 mod state;
+mod tools;
 mod tracing_setup;
 
 use clap::Parser;
