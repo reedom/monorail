@@ -79,6 +79,10 @@ struct RepoTask {
     repo: String,                // e.g. "core-api"
     branch: String,              // == ticket key, e.g. "ACM-123"
     worktree_path: PathBuf,      // resolved via ghq + wt convention
+    anchors: Vec<PathBuf>,       // worktree-relative; starting points
+                                 // for .monorail/ resolution (§13.1).
+                                 // Empty == derived (Plan YAML or diff
+                                 // common ancestor or worktree root).
     phase: Phase,                // per-repo phase (independent)
     deps: Vec<RepoRef>,          // upstream RepoTask deps in this Job
     wait_for: Option<WaitCondition>,
@@ -325,6 +329,9 @@ repos:
   - org: acme
     name: web-app
     after: acme/core-api
+    anchors:
+      - apps/api          # subproject inside the bigmono web-app
+      - apps/web          # another subproject worked on in the same job
 ```
 ````
 
@@ -340,6 +347,10 @@ Rules:
   before leaving the planning phase.
 - `wait_for.type` initial set: `merged`, `ci-success`, `ci-preview-branch`,
   `release-published`, `manual`.
+- `anchors` is **optional**, worktree-relative. Used as starting points for
+  `.monorail/` resolution (§13.1). When omitted, monorail derives anchors
+  from the diff's common ancestor (post-impl) or defaults to the worktree
+  root (pre-impl).
 
 ### 6.3 Phase ↔ Linear status mapping
 
@@ -427,11 +438,62 @@ After PR is opened:
 2. On failure: fetch logs, root-cause, fix in worktree, push.
 3. On success: if `monorail:auto-merge` set and PR is approval-ready, merge.
 
-### 7.5 Multi-repo DAG execution
+### 7.5 Multi-repo DAG execution and per-repo isolation
 
 Each `RepoTask` advances independently up to `PrOpened`, gated by `deps` and
 `wait_for`. Cross-repo merge ordering is determined by deps unless
 `auto-merge` is off (in which case humans drive merges).
+
+**Hard contract — per-repo isolation**:
+
+- One phase invocation = one `RepoTask` = one worktree = one engine
+  subprocess. The engine's working directory is the assigned worktree.
+- An engine invocation **MUST NOT edit files outside its assigned
+  worktree**. Cross-repo coordinated edits are split into separate
+  `RepoTask`s scheduled by the DAG.
+- This is enforced two ways:
+  1. The phase system prompt explicitly tells the engine its scope and
+     forbids editing outside it.
+  2. **Post-flight verification**: when the engine returns, monorail runs
+     `git status` (or equivalent) over **all** worktrees in the Job. If any
+     worktree other than the assigned one shows changes, the phase is
+     rejected and escalated as `CrossRepoLeak`. The leaked changes are
+     stashed for inspection but not applied.
+- This isolation is what lets the prompt-resolution rules (§13.1) work:
+  each invocation has exactly one repo's `.monorail/` chain, with no
+  ambiguity.
+
+### 7.6 Cross-repo context injection
+
+Per-repo isolation does not mean the engine is blind to its sibling
+`RepoTask`s. monorail injects, into every phase invocation, a read-only
+context block describing the rest of the Job:
+
+```
+## Job context (read-only — DO NOT edit these repos)
+
+ticket: ACM-123
+your assignment: acme/core-api  (this worktree)
+
+other repos in this job:
+  - acme/proto-schema  phase=Merged       PR=#456 (merged at abc123)
+  - acme/web-app       phase=Pending      depends on acme/core-api
+
+shared facts:
+  - acme/proto-schema preview branch ready: preview/ACM-123 (commit def456)
+  - the planned API change adds field `priority` to Task message
+```
+
+Sources for this block:
+
+- monorail's `Job` and `RepoTask` state (phases, PR URLs, etc.).
+- Cross-repo `consumes` / `wait_for` resolutions (e.g., the resolved
+  preview branch ref).
+- Plan YAML excerpts from the Linear ticket (so all engines see the same
+  agreed plan).
+
+This is **context**, not prompt-overrides. It is regenerated per
+invocation from current state; it is not user-editable per repo.
 
 ## 8. Escalation Model
 
@@ -666,17 +728,47 @@ already documents for AI agents. In priority order:
    `pnpm-workspace.yaml`, `pyproject.toml`, `go.mod`, `Justfile`, etc. —
    used to confirm the stack and likely commands.
 4. **Convention overrides** (optional, all under `.monorail/` if present):
-   - `.monorail/prompts/plan.md`        — extra context for planning phase
-   - `.monorail/prompts/review.md`      — extra context for self-review
-   - `.monorail/prompts/lint-test.md`   — extra context for lint/test loop
-   - `.monorail/prompts/ci-fix.md`      — extra context for CI-fix loop
-   - `.monorail/skills/<name>.md`       — repo-local skill files surfaced
-                                          to the engine
+   - `.monorail/prompts/<phase>.md` — extra context for a phase
+     (`plan`, `implement`, `review`, `lint-test`, `ci-fix`)
+   - `.monorail/hooks/<event>.sh` — pre/post side-effect scripts
+     (e.g., `pre-review.sh`, `post-implement.sh`). Run with cwd set to the
+     **anchor** dir, with env vars `MONORAIL_TICKET`, `MONORAIL_PHASE`,
+     `MONORAIL_REPO`, `MONORAIL_WORKTREE`, `MONORAIL_ANCHOR`,
+     `MONORAIL_ATTEMPT`. Non-zero exit aborts the phase.
+   - `.monorail/skills/<name>.md` — repo-local skill files surfaced to
+     the engine
 
-The override files are plain markdown; the Engine adapter prepends them to
-its phase prompt when present. This keeps the contract simple: the repo
-either has nothing (engine figures it out from AI-facing docs) or has
-prompt files that add specific guidance.
+#### 13.1.1 Layered resolution algorithm
+
+`.monorail/` directories may exist at three layers within a single
+`RepoTask`'s scope:
+
+| Layer | Path | Role |
+|---|---|---|
+| User | `~/.monorail/` | personal defaults across all repos |
+| Repo | `<worktree-root>/.monorail/` | repo-wide defaults |
+| Anchor | `<anchor-dir>/.monorail/` | subproject-specific (only inside this RepoTask's worktree) |
+
+`<anchor-dir>` is taken from `RepoTask.anchors` (declared in Plan YAML or
+derived: see §6.2 / §3.1). Multiple anchors → multiple anchor layers, each
+resolved independently for the files within its subtree.
+
+Resolution differs per asset type:
+
+| Asset | Strategy | Order |
+|---|---|---|
+| `prompts/<phase>.md` | **layered concat** | user → repo → anchor (broad → narrow). Layers that exist are concatenated with separators; missing layers are skipped. |
+| `hooks/<event>.sh` | **layered execute** | user → repo → anchor (broad → narrow). Each existing layer runs in order; any non-zero exit aborts. |
+| `skills/<name>.md` | **first-match-wins** | anchor → repo → user (narrow → broad). The closest occurrence of a given filename is used; identical filenames at outer layers are ignored. |
+
+For per-file decisions during a phase (e.g., when reviewing many files in
+a multi-anchor RepoTask), each file is associated with the **closest
+enclosing anchor** under the worktree; files outside any declared anchor
+are processed under the repo+user layers only.
+
+Other repos' `.monorail/` directories are never consulted for this
+RepoTask. Per the §7.5 isolation contract, each engine invocation sees
+exactly one repo's `.monorail/` chain.
 
 Engine choice and concurrency are **operator concerns**, not repo concerns,
 so they belong in the global config (§13.2), not here. There is no
