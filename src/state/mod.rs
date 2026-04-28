@@ -43,3 +43,6 @@ mod tests {
         assert_eq!(row.0, 0);
     }
 }
+
+pub mod jobs;
+pub use jobs::JobRow;
