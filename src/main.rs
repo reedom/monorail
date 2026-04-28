@@ -79,6 +79,7 @@ async fn run_command(ticket: String) -> anyhow::Result<()> {
         verifier: &verifier,
         gh: &gh,
         channel: &channel,
+        linear: linear.as_ref(),
         ticket: &ticket,
         repo_task_id,
         worktree: &worktree,
