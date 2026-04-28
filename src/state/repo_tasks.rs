@@ -52,13 +52,18 @@ impl SqliteState {
     }
 
     pub async fn bump_attempt(&self, id: i64, kind: AttemptKind) -> Result<()> {
-        let col = match kind {
-            AttemptKind::Review => "review_attempts",
-            AttemptKind::LintTest => "lint_test_attempts",
-            AttemptKind::CiFix => "ci_fix_attempts",
+        const Q_REVIEW: &str =
+            "UPDATE repo_tasks SET review_attempts = review_attempts + 1 WHERE id = ?";
+        const Q_LINT_TEST: &str =
+            "UPDATE repo_tasks SET lint_test_attempts = lint_test_attempts + 1 WHERE id = ?";
+        const Q_CI_FIX: &str =
+            "UPDATE repo_tasks SET ci_fix_attempts = ci_fix_attempts + 1 WHERE id = ?";
+        let sql = match kind {
+            AttemptKind::Review => Q_REVIEW,
+            AttemptKind::LintTest => Q_LINT_TEST,
+            AttemptKind::CiFix => Q_CI_FIX,
         };
-        let sql = format!("UPDATE repo_tasks SET {col} = {col} + 1 WHERE id = ?");
-        sqlx::query(&sql).bind(id).execute(&self.pool).await?;
+        sqlx::query(sql).bind(id).execute(&self.pool).await?;
         Ok(())
     }
 
