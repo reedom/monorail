@@ -1,5 +1,6 @@
 mod cli;
 mod domain;
+mod engine;
 mod error;
 mod linear;
 mod state;
