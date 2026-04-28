@@ -49,14 +49,77 @@ impl Engine for ClaudeCodeAdapter {
         Ok(ImplResult { summary })
     }
 
-    async fn review(&self, _ctx: ReviewContext) -> Result<Vec<Finding>> {
-        Err(MonorailError::PhaseAborted("review unimplemented in Task 15".into()))
+    async fn review(&self, ctx: ReviewContext) -> Result<Vec<Finding>> {
+        let prompt = format!(
+            "Run /pr-review-toolkit:review-pr against the current worktree changes for ticket {ticket}. \
+             At the end, output a JSON array of findings on a single line prefixed with `FINDINGS_JSON: `. \
+             Each finding has: id (stable hash of file+line+rule), file, line (or null), \
+             severity (critical|high|medium|low|info), rule (or null), message.",
+            ticket = ctx.ticket,
+        );
+        let raw = self.run(&ctx.worktree, &prompt).await?;
+        let line = raw.lines().rev()
+            .find(|l| l.contains("FINDINGS_JSON:"))
+            .ok_or_else(|| MonorailError::PhaseAborted("no FINDINGS_JSON line in review output".into()))?;
+        let json_part = line.split_once("FINDINGS_JSON:")
+            .map(|(_, j)| j.trim())
+            .unwrap_or("[]");
+        let findings: Vec<Finding> = serde_json::from_str(json_part)
+            .map_err(|e| MonorailError::Serde(format!("findings parse: {e}; raw: {json_part}")))?;
+        Ok(findings)
     }
-    async fn analyze_finding(&self, _f: Finding, _c: ReviewContext) -> Result<RootCauseAnalysis> {
-        Err(MonorailError::PhaseAborted("analyze_finding unimplemented in Task 15".into()))
+
+    async fn analyze_finding(
+        &self,
+        finding: Finding,
+        ctx: ReviewContext,
+    ) -> Result<RootCauseAnalysis> {
+        let prompt = format!(
+            "Analyze the root cause of the review finding below in the worktree at {wt} for ticket {ticket}. \
+             Decide: does this finding REQUIRE a fix, or can it be dismissed (e.g., intentional, false positive)? \
+             Output exactly two lines:\n\
+             DECISION: <fix|dismiss>\n\
+             REASON: <one sentence>\n\n\
+             Finding:\n{f}",
+            wt = ctx.worktree.display(),
+            ticket = ctx.ticket,
+            f = serde_json::to_string_pretty(&finding).unwrap_or_default(),
+        );
+        let out = self.run(&ctx.worktree, &prompt).await?;
+        let mut decision = None;
+        let mut reason = String::new();
+        for line in out.lines() {
+            if let Some(rest) = line.strip_prefix("DECISION:") {
+                decision = Some(rest.trim().to_string());
+            } else if let Some(rest) = line.strip_prefix("REASON:") {
+                reason = rest.trim().to_string();
+            }
+        }
+        let requires_fix = matches!(decision.as_deref(), Some("fix"));
+        Ok(RootCauseAnalysis {
+            finding_id: finding.id,
+            requires_fix,
+            reason,
+        })
     }
-    async fn apply_fix(&self, _a: RootCauseAnalysis, _c: ReviewContext) -> Result<FixOutcome> {
-        Err(MonorailError::PhaseAborted("apply_fix unimplemented in Task 15".into()))
+
+    async fn apply_fix(
+        &self,
+        analysis: RootCauseAnalysis,
+        ctx: ReviewContext,
+    ) -> Result<FixOutcome> {
+        let prompt = format!(
+            "Apply the fix for finding id={fid} in the worktree at {wt}. \
+             Reason from analysis: {reason}. \
+             Do NOT edit files outside this worktree. \
+             Reply with exactly one line: APPLIED or NOT_APPLIED, then a short reason on the same line.",
+            fid = analysis.finding_id,
+            wt = ctx.worktree.display(),
+            reason = analysis.reason,
+        );
+        let out = self.run(&ctx.worktree, &prompt).await?;
+        let applied = out.contains("APPLIED") && !out.contains("NOT_APPLIED");
+        Ok(FixOutcome { applied, message: out })
     }
 
     async fn fix_failure(&self, ctx: FailureContext) -> Result<FixOutcome> {
@@ -100,5 +163,15 @@ mod tests {
             MonorailError::Io(_) | MonorailError::ExternalTool { .. } => {}
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_findings_json_line() {
+        let raw = "preamble\nMore text\nFINDINGS_JSON: [\
+            {\"id\":\"f1\",\"file\":\"a.rs\",\"line\":10,\"severity\":\"high\",\"rule\":null,\"message\":\"x\"}]";
+        let line = raw.lines().rev().find(|l| l.contains("FINDINGS_JSON:")).unwrap();
+        let part = line.split_once("FINDINGS_JSON:").unwrap().1.trim();
+        let v: Vec<Finding> = serde_json::from_str(part).unwrap();
+        assert_eq!(v[0].id, "f1");
     }
 }
