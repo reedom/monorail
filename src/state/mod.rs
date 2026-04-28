@@ -44,5 +44,9 @@ mod tests {
     }
 }
 
+pub mod events;
 pub mod jobs;
+pub mod repo_tasks;
+
 pub use jobs::JobRow;
+pub use repo_tasks::{AttemptKind, RepoTaskRow};
