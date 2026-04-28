@@ -22,8 +22,8 @@ mutation UpdateState($id: String!, $stateId: String!) {
 }"#;
 
 pub const ISSUE_STATUSES_QUERY: &str = r#"
-query IssueStatuses($teamId: String!) {
+query IssueStatuses($teamId: ID!) {
   workflowStates(filter: { team: { id: { eq: $teamId } } }) {
-    nodes { id name type }
+    nodes { id name type position }
   }
 }"#;

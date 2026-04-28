@@ -95,6 +95,7 @@ mod tests {
                 id: "s".into(),
                 name: "Backlog".into(),
                 kind: "backlog".into(),
+                position: None,
             },
             team_id: "team-1".into(),
         }

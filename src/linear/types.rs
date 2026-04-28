@@ -25,6 +25,10 @@ pub struct WorkflowState {
     pub name: String,
     #[serde(rename = "type")]
     pub kind: String,
+    // Linear's display-order field. Lower = earlier. Optional so ISSUE_QUERY,
+    // which doesn't request it, still parses (Issue.state has no position).
+    #[serde(default)]
+    pub position: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
