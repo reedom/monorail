@@ -216,4 +216,106 @@ mod tests {
         let c = client.post_comment("issue-1", "hi").await.unwrap();
         assert_eq!(c.id, "c1");
     }
+
+    // Live contract tests — opt-in, hit the real Linear API.
+    //
+    // Run with:
+    //   cargo test --lib linear:: -- --ignored --nocapture
+    //
+    // Required env: LINEAR_API_KEY
+    // Optional env: LINEAR_API_ENDPOINT, LINEAR_TEST_TICKET (default RDM-5)
+    //
+    // Read-only: no comments posted, no states changed.
+    mod live {
+        use super::super::state_resolver::{LinearStateResolver, StateKind};
+        use super::*;
+
+        const DEFAULT_TICKET: &str = "RDM-5";
+        const DEFAULT_ENDPOINT: &str = "https://api.linear.app/graphql";
+
+        fn live_client() -> (LinearClient, String) {
+            let api_key = std::env::var("LINEAR_API_KEY")
+                .expect("LINEAR_API_KEY required (set via .envrc + direnv allow)");
+            let endpoint = std::env::var("LINEAR_API_ENDPOINT")
+                .unwrap_or_else(|_| DEFAULT_ENDPOINT.into());
+            let ticket = std::env::var("LINEAR_TEST_TICKET")
+                .unwrap_or_else(|_| DEFAULT_TICKET.into());
+            (LinearClient::new(endpoint, &api_key).expect("LinearClient::new"), ticket)
+        }
+
+        #[tokio::test]
+        #[ignore = "live Linear API"]
+        async fn get_issue_returns_team_id() {
+            let (client, ticket) = live_client();
+            let issue = client.get_issue(&ticket).await.expect("get_issue");
+            assert_eq!(issue.identifier, ticket);
+            assert!(!issue.team_id.is_empty(), "team_id populated");
+            assert!(!issue.id.is_empty(), "id populated");
+            eprintln!(
+                "issue id={} identifier={} team_id={} state={:?} title={:?}",
+                issue.id, issue.identifier, issue.team_id, issue.state.name, issue.title
+            );
+            eprintln!("labels:");
+            for l in &issue.labels {
+                eprintln!("  - {} (id={})", l.name, l.id);
+            }
+        }
+
+        #[tokio::test]
+        #[ignore = "live Linear API"]
+        async fn list_issue_statuses_includes_started_and_completed() {
+            let (client, ticket) = live_client();
+            let issue = client.get_issue(&ticket).await.expect("get_issue");
+            let states = client
+                .list_issue_statuses(&issue.team_id)
+                .await
+                .expect("list_issue_statuses");
+
+            assert!(!states.is_empty(), "team has at least one workflow state");
+
+            // Reorder for display so it matches Linear's status-picker UI:
+            // group by kind (backlog → unstarted → started → completed → canceled),
+            // then sort by `position` within each group.
+            fn kind_priority(kind: &str) -> u8 {
+                match kind {
+                    "triage" => 0,
+                    "backlog" => 1,
+                    "unstarted" => 2,
+                    "started" => 3,
+                    "completed" => 4,
+                    "canceled" => 5,
+                    _ => 99,
+                }
+            }
+            let mut ui_order: Vec<&WorkflowState> = states.iter().collect();
+            ui_order.sort_by(|a, b| {
+                kind_priority(&a.kind).cmp(&kind_priority(&b.kind)).then_with(|| {
+                    a.position
+                        .unwrap_or(f64::INFINITY)
+                        .total_cmp(&b.position.unwrap_or(f64::INFINITY))
+                })
+            });
+            eprintln!("states ({}, in UI order):", states.len());
+            for s in &ui_order {
+                eprintln!(
+                    "  - kind={:<10} position={:<8} name={:?}",
+                    s.kind,
+                    s.position
+                        .map(|p| format!("{p}"))
+                        .unwrap_or_else(|| "-".into()),
+                    s.name
+                );
+            }
+
+            let resolver = LinearStateResolver::from_states(states);
+            let started = resolver
+                .for_kind(StateKind::Started)
+                .expect("team must have a workflow state of type=started");
+            let completed = resolver
+                .for_kind(StateKind::Completed)
+                .expect("team must have a workflow state of type=completed");
+            eprintln!("picked started:   name={:?} position={:?}", started.name, started.position);
+            eprintln!("picked completed: name={:?} position={:?}", completed.name, completed.position);
+        }
+    }
 }
