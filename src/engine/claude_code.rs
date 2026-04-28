@@ -83,7 +83,8 @@ impl Engine for ClaudeCodeAdapter {
              Finding:\n{f}",
             wt = ctx.worktree.display(),
             ticket = ctx.ticket,
-            f = serde_json::to_string_pretty(&finding).unwrap_or_default(),
+            f = serde_json::to_string_pretty(&finding)
+                .map_err(|e| crate::error::MonorailError::Serde(e.to_string()))?,
         );
         let out = self.run(&ctx.worktree, &prompt).await?;
         let mut decision = None;
