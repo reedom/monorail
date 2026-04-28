@@ -25,6 +25,7 @@ impl SqliteState {
         Ok(())
     }
 
+    #[allow(dead_code)] // TUI / ops queries (later plan)
     pub async fn count_events(&self, ticket: &TicketKey) -> Result<i64> {
         let row: (i64,) = sqlx::query_as(
             r#"SELECT COUNT(*) FROM events WHERE ticket = ?"#,

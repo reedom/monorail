@@ -48,5 +48,7 @@ pub mod events;
 pub mod jobs;
 pub mod repo_tasks;
 
+#[allow(unused_imports)]
 pub use jobs::JobRow;
+#[allow(unused_imports)]
 pub use repo_tasks::{AttemptKind, RepoTaskRow};

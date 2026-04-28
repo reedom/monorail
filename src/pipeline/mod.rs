@@ -4,10 +4,13 @@ pub mod lint_test;
 pub mod open_pr;
 pub mod self_review;
 
+#[allow(unused_imports)]
 pub use ci_fix::{run_ci_fix, CiFixOutcome, CI_FIX_MAX};
 pub use implement::run_implement;
+#[allow(unused_imports)]
 pub use lint_test::{run_lint_test, LintTestOutcome, Verifier, LINT_TEST_MAX};
 pub use open_pr::run_open_pr;
+#[allow(unused_imports)]
 pub use self_review::{run_self_review, SelfReviewOutcome, SELF_REVIEW_MAX};
 
 use crate::channel::HumanChannel;
@@ -38,8 +41,10 @@ pub struct TypeARunArgs<'a, E: Engine + ?Sized, V: Verifier + ?Sized, G: GhTool 
 }
 
 pub enum TypeARunOutcome {
+    #[allow(dead_code)] // auto-merge wiring: later plan
     Merged,
     PrGreen,
+    #[allow(dead_code)] // EscalationReason payload read by callers; lint sees only the variant
     Escalated(EscalationReason),
 }
 

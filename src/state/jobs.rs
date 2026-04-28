@@ -20,6 +20,7 @@ impl SqliteState {
         Ok(())
     }
 
+    #[allow(dead_code)] // TUI / ops queries (later plan)
     pub async fn get_job(&self, ticket: &TicketKey) -> Result<Option<JobRow>> {
         let row: Option<JobRow> = sqlx::query_as(
             r#"SELECT ticket, work_type, state, auto_merge, created_at, updated_at
@@ -44,6 +45,7 @@ impl SqliteState {
     }
 }
 
+#[allow(dead_code)] // TUI / ops queries (later plan)
 #[derive(Debug, sqlx::FromRow)]
 pub struct JobRow {
     pub ticket: String,

@@ -4,8 +4,10 @@ pub mod phase;
 pub mod question;
 pub mod ticket;
 
+#[allow(unused_imports)]
 pub use finding::{Finding, FixOutcome, RootCauseAnalysis, Severity};
 pub use job::{Job, RepoRef, RepoTask};
 pub use phase::{EscalationReason, JobState, Phase, WorkType};
+#[allow(unused_imports)]
 pub use question::{Answer, Question};
 pub use ticket::TicketKey;

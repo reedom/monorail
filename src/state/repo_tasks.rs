@@ -1,7 +1,6 @@
-use crate::domain::{Phase, RepoRef, RepoTask, TicketKey};
+use crate::domain::{Phase, RepoTask, TicketKey};
 use crate::error::Result;
 use crate::state::SqliteState;
-use std::path::PathBuf;
 use url::Url;
 
 impl SqliteState {
@@ -30,6 +29,7 @@ impl SqliteState {
         Ok(result.last_insert_rowid())
     }
 
+    #[allow(dead_code)] // TUI / ops queries (later plan)
     pub async fn list_repo_tasks(&self, ticket: &TicketKey) -> Result<Vec<RepoTaskRow>> {
         let rows: Vec<RepoTaskRow> = sqlx::query_as(
             r#"SELECT id, ticket, org, repo, branch, worktree_path, anchors_json, phase,
@@ -77,6 +77,7 @@ impl SqliteState {
     }
 }
 
+#[allow(dead_code)] // TUI / ops queries (later plan)
 #[derive(Debug, sqlx::FromRow)]
 pub struct RepoTaskRow {
     pub id: i64,
@@ -118,8 +119,9 @@ fn phase_str(p: Phase) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Job, JobState, WorkType};
+    use crate::domain::{Job, JobState, RepoRef, WorkType};
     use chrono::Utc;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     async fn fresh() -> (TempDir, SqliteState, TicketKey) {

@@ -11,6 +11,7 @@ pub struct NotifyContext {
 #[async_trait]
 pub trait HumanChannel: Send + Sync {
     async fn notify(&self, ctx: NotifyContext) -> Result<()>;
+    #[allow(dead_code)] // Plan 3: Type B planning loop
     async fn post_question(&self, q: Question) -> Result<String>;
 }
 

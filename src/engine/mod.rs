@@ -10,6 +10,7 @@ pub struct ImplContext {
     pub worktree: PathBuf,
     pub ticket: String,
     pub instructions: String,
+    #[allow(dead_code)] // multi-repo: anchors restrict the engine's scope (Plan: multi-repo)
     pub anchors: Vec<PathBuf>,
 }
 
@@ -22,6 +23,7 @@ pub struct ImplResult {
 pub struct ReviewContext {
     pub worktree: PathBuf,
     pub ticket: String,
+    #[allow(dead_code)] // multi-repo: anchors restrict the engine's scope (Plan: multi-repo)
     pub anchors: Vec<PathBuf>,
 }
 

@@ -9,6 +9,7 @@ pub trait WtTool: Send + Sync {
     /// Returns the worktree path.
     async fn switch_create(&self, repo_path: &Path, branch: &str) -> Result<PathBuf>;
 
+    #[allow(dead_code)] // worktree cleanup phase (later plan)
     async fn remove(&self, worktree_path: &Path) -> Result<()>;
 }
 
