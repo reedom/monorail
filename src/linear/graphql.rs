@@ -20,3 +20,10 @@ pub const ISSUE_UPDATE_STATE_MUTATION: &str = r#"
 mutation UpdateState($id: String!, $stateId: String!) {
   issueUpdate(id: $id, input: { stateId: $stateId }) { success }
 }"#;
+
+pub const ISSUE_STATUSES_QUERY: &str = r#"
+query IssueStatuses($teamId: String!) {
+  workflowStates(filter: { team: { id: { eq: $teamId } } }) {
+    nodes { id name type }
+  }
+}"#;

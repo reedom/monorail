@@ -84,6 +84,30 @@ impl LinearClient {
         serde_json::from_value(c.clone()).map_err(|e| MonorailError::Linear(e.to_string()))
     }
 
+    pub async fn list_issue_statuses(&self, team_id: &str) -> Result<Vec<WorkflowState>> {
+        let body = json!({
+            "query": graphql::ISSUE_STATUSES_QUERY,
+            "variables": { "teamId": team_id }
+        });
+        let resp: Value = self
+            .http
+            .post(&self.endpoint)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| MonorailError::Linear(e.to_string()))?
+            .error_for_status()
+            .map_err(|e| MonorailError::Linear(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| MonorailError::Linear(e.to_string()))?;
+        let nodes = resp
+            .pointer("/data/workflowStates/nodes")
+            .ok_or_else(|| MonorailError::Linear("missing workflowStates.nodes".into()))?
+            .clone();
+        serde_json::from_value(nodes).map_err(|e| MonorailError::Linear(e.to_string()))
+    }
+
     pub async fn set_state(&self, issue_id: &str, state_id: &str) -> Result<()> {
         let body = json!({
             "query": graphql::ISSUE_UPDATE_STATE_MUTATION,
@@ -151,6 +175,27 @@ mod tests {
         let issue = client.get_issue("ACM-1").await.unwrap();
         assert_eq!(issue.identifier, "ACM-1");
         assert_eq!(issue.labels[0].name, "monorail:type/bug");
+    }
+
+    #[tokio::test]
+    async fn list_issue_statuses_returns_all_team_states() {
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "data": { "workflowStates": { "nodes": [
+                {"id":"s1","name":"Backlog","type":"backlog"},
+                {"id":"s2","name":"In Progress","type":"started"},
+                {"id":"s3","name":"Done","type":"completed"},
+            ]}}
+        });
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+        let c = LinearClient::new(format!("{}/graphql", server.uri()), "k").unwrap();
+        let states = c.list_issue_statuses("team-1").await.unwrap();
+        assert_eq!(states.len(), 3);
+        assert_eq!(states[1].kind, "started");
     }
 
     #[tokio::test]
