@@ -1,4 +1,5 @@
 mod cli;
+mod domain;
 mod error;
 mod tracing_setup;
 
