@@ -1,6 +1,7 @@
 use crate::domain::{Finding, FixOutcome, RootCauseAnalysis};
 use crate::error::Result;
 use async_trait::async_trait;
+#[cfg(test)]
 use mockall::automock;
 use std::path::PathBuf;
 
@@ -39,7 +40,7 @@ pub enum FailureKind {
 }
 
 #[async_trait]
-#[automock]
+#[cfg_attr(test, automock)]
 pub trait Engine: Send + Sync {
     async fn implement(&self, ctx: ImplContext) -> Result<ImplResult>;
     async fn review(&self, ctx: ReviewContext) -> Result<Vec<Finding>>;
