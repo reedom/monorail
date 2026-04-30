@@ -54,10 +54,10 @@ agents.
 
 ### 1.3 The pivot
 
-Move the loops and prompts into Claude Code skills and agents in this
-repo's plugin (`.claude/plugins/monorail/`). The daemon dispatches one
-skill per Job archetype (bug / feature) and observes its terminal
-outcome via a structured contract. The pipeline modules in Rust stay as
+Move the loops and prompts into Claude Code commands and agents in
+this repo's `.claude/` directory (auto-discovered, no plugin install).
+The daemon dispatches one command per Job archetype (bug / feature)
+and observes its terminal outcome via a structured contract. The pipeline modules in Rust stay as
 a safety net until the skill route is proven; then they're pruned.
 
 This is **not** a code rewrite. The Linear client, state machine,
@@ -81,12 +81,12 @@ Engine adapter shrinks from a 5-method interface to a 1-2 method
 │    • Linear sync at job-level (started / completed)      │
 │    • Engine adapter: invokes skill, parses result        │
 └────────────────────────┬─────────────────────────────────┘
-                         │ claude -p "/monorail:run-bug TICKET"
+                         │ claude -p "/monorail-run-bug TICKET"
                          ▼
 ┌──────────────────────────────────────────────────────────┐
 │  Skill (orchestrator, per Job archetype)                 │
-│    • monorail:run-bug    (Type A, no human)              │
-│    • monorail:run-feature (Type B, with human)           │
+│    • /monorail-run-bug    (Type A, no human)              │
+│    • /monorail-run-feature (Type B, with human)           │
 │  Responsibilities:                                       │
 │    • Loop control (self-review max 5, lint/test max 5,   │
 │      ci-fix max 3)                                       │
@@ -130,20 +130,23 @@ Engine adapter shrinks from a 5-method interface to a 1-2 method
 | From | To | Notes |
 |---|---|---|
 | `src/engine/claude_code.rs` prompt strings (~150 lines of `format!`) | Skill / agent markdown files | The prompts become the skill/agent system prompts directly. |
-| `src/pipeline/self_review.rs` loop body | `monorail:run-bug` skill | Skill calls `monorail-self-review` agent; if findings exist, calls `monorail-fix-finding` agent per finding; loops up to 5 times. |
-| `src/pipeline/lint_test.rs` loop body | `monorail:run-bug` skill | Skill calls `monorail-lint-test` agent; agent runs verify cmd and fixes failures internally; skill bounds outer attempts. |
-| `src/pipeline/ci_fix.rs` loop body | `monorail:run-bug` skill | Same shape as lint/test, but reads CI logs via `gh` (skill calls `monorail-ci-fix` agent). |
+| `src/pipeline/self_review.rs` loop body | `/monorail-run-bug` skill | Skill calls `monorail-self-review` agent; if findings exist, calls `monorail-fix-finding` agent per finding; loops up to 5 times. |
+| `src/pipeline/lint_test.rs` loop body | `/monorail-run-bug` skill | Skill calls `monorail-lint-test` agent; agent runs verify cmd and fixes failures internally; skill bounds outer attempts. |
+| `src/pipeline/ci_fix.rs` loop body | `/monorail-run-bug` skill | Same shape as lint/test, but reads CI logs via `gh` (skill calls `monorail-ci-fix` agent). |
 | `Engine` trait's 5 methods (`implement`, `review`, `analyze_finding`, `apply_fix`, `fix_failure`) | 1-2 methods (`run_skill`) | See §6 for the new contract. |
 
 ---
 
-## 3. Skill catalog
+## 3. Command catalog
 
-Two skills, both top-level orchestrators. Names use the `monorail:`
-namespace (entire skill name, including the colon, is the activation
-trigger).
+Two commands, both top-level orchestrators. They live in
+`.claude/commands/` and are invoked as `/monorail-run-bug TICKET` /
+`/monorail-run-feature TICKET`. (Throughout this spec the term "skill"
+is sometimes used colloquially for these orchestrators where it pre-dates
+the plugin-to-command refactor; the canonical layout is commands —
+see §5.)
 
-### 3.1 `monorail:run-bug`
+### 3.1 `/monorail-run-bug`
 
 **Purpose**: Run a Type A ticket end-to-end without human intervention.
 
@@ -162,15 +165,27 @@ trigger).
 3. **Lint/test loop (max 5)** — invoke `monorail-lint-test` agent. Agent
    discovers verify command, runs it, fixes failures, returns
    `green | red`. If red after 5 attempts, escalate.
-4. **Open PR** — invoke `monorail-open-pr` agent. Returns `{pr_url}`.
-5. **CI fix loop (max 3)** — invoke `monorail-ci-fix` agent. Polls
+4. **Acceptance verification** — invoke `monorail-verify-acceptance` agent.
+   Agent reads the ticket's `## Acceptance Criteria` section (EARS-style
+   bullets), the diff, and added/modified tests, and judges each
+   criterion as `satisfied | partial | unsatisfied` with both a code
+   evidence line and a test evidence line. If any criterion is
+   `unsatisfied` (or `partial` for a strict policy), escalate with
+   `phase=verify`, `reason=criteria_unmet`, and the report attached.
+   This is the trust boundary that lets the daemon transition Linear to
+   Done — see §6.5 for how the result is consumed.
+5. **Open PR** — invoke `monorail-open-pr` agent. Returns `{pr_url}`.
+   The agent embeds the verification report (criterion list with
+   evidence) into the PR description so human reviewers see the same
+   acceptance check the daemon will use.
+6. **CI fix loop (max 3)** — invoke `monorail-ci-fix` agent. Polls
    GitHub Actions until checks finish, fixes failures, pushes. If
    checks fail after 3 attempts, escalate (PR remains open per original
    §8 contract).
 
 **Result**: emits `MONORAIL_RESULT: {...}` (§6.2) and exits.
 
-### 3.2 `monorail:run-feature`
+### 3.2 `/monorail-run-feature`
 
 **Purpose**: Run a Type B ticket with a human-in-the-loop planning phase.
 
@@ -181,7 +196,7 @@ trigger).
    replies. When the human approves a plan, agent writes the plan back
    to the ticket body as a `## Monorail Plan` YAML section (per
    original §6.2) and exits.
-2. **Phases 2–5** — identical to `monorail:run-bug` from the implement
+2. **Phases 2–5** — identical to `/monorail-run-bug` from the implement
    phase onward.
 
 **Result**: same `MONORAIL_RESULT` shape as `run-bug`.
@@ -203,11 +218,67 @@ result the skill can act on.
 | `monorail-lint-test` | worktree path, prior failure log (optional) | `{ outcome: "green"|"red", log: string }` | Read, Edit, Write, Bash |
 | `monorail-open-pr` | worktree path, ticket key, summary | `{ pr_url: string }` | Bash(`gh pr create`, `git push`) |
 | `monorail-ci-fix` | worktree path, ticket key, pr_url | `{ outcome: "green"|"red", attempts: int }` | Read, Edit, Write, Bash(`gh`) |
+| `monorail-verify-acceptance` | worktree path, ticket key | `{ all_satisfied: bool, report: [...] }` | Read, Grep, Bash(`git diff`), Linear MCP (read-only) |
 | `monorail-plan-with-human` | ticket key | `{ plan_yaml: string, approved: bool }` | Read, Bash, Linear MCP tools |
 
 Agents do **not** know about each other. The skill is the only coordinator.
 
-### 4.1 Verify-cmd discovery
+### 4.1 Acceptance criteria convention (EARS)
+
+Every Linear ticket eligible for monorail dispatch MUST include an
+`## Acceptance Criteria` section in its body. Bullets are written in
+EARS style — preferably the Ubiquitous (`The X shall Y.`) and
+Event-driven (`When <trigger>, the X shall Y.`) patterns.
+
+Example:
+
+```
+## Acceptance Criteria
+
+- The README.md file shall exist at the repository root.
+- The README shall include sections: Overview, Installation, Usage.
+- When `cargo test` runs, all tests shall pass.
+```
+
+The triager rejects tickets missing this section with reason
+`needs_acceptance_criteria` and posts a Linear comment requesting it.
+This is a **hard contract** — without explicit, written criteria,
+there is no objective basis for monorail to mark a ticket Done.
+
+**Project-level spec sync (deferred):** The criteria added in a ticket
+typically reflect a behavior change that should also flow into the
+project's canonical EARS spec (e.g., `docs/spec/EARS.md` or
+similar). monorail v1 does not enforce this propagation — it's tracked
+as roadmap row `project-spec-sync`. The convention exists so when that
+row is implemented, ticket criteria already use a compatible syntax.
+
+### 4.2 Verification rubric
+
+`monorail-verify-acceptance` produces a report with one entry per
+criterion:
+
+```json
+{
+  "criterion": "The README shall include sections: Overview, Installation, Usage.",
+  "satisfied": "yes" | "partial" | "no",
+  "code_evidence": "README.md lines 1-3 contain # Overview, # Installation, # Usage",
+  "test_evidence": "tests/readme_structure.rs:10 asserts these sections exist",
+  "score": 1.0
+}
+```
+
+Both `code_evidence` and `test_evidence` MUST be non-empty for a
+`satisfied="yes"` verdict. A criterion satisfied only by code with no
+corresponding test is `satisfied="partial"` — the orchestrator skill
+treats this as a failure unless an explicit `monorail:no-test-required`
+ticket label is set.
+
+This two-key requirement is the trust mechanism: agent judgment can be
+wrong, but if the agent claims a test exists at a given location, CI
+will independently verify whether that test passes. Three-layer check:
+agent says satisfied → test exists → CI green.
+
+### 4.3 Verify-cmd discovery
 
 `monorail-lint-test` (and `monorail-ci-fix` to a lesser extent) needs to
 know the project's verify command. Discovery, in priority order:
@@ -227,30 +298,36 @@ monorail-specific config required.
 
 ## 5. File layout
 
-All skills and agents are checked into this repo at:
+Commands and agents live in the project's `.claude/` directory and are
+auto-discovered by Claude Code without a plugin install step:
 
 ```
 .claude/
-└── plugins/
-    └── monorail/
-        ├── plugin.json                        # plugin manifest
-        ├── skills/
-        │   ├── run-bug.md
-        │   └── run-feature.md
-        └── agents/
-            ├── implement.md
-            ├── self-review.md
-            ├── fix-finding.md
-            ├── lint-test.md
-            ├── open-pr.md
-            ├── ci-fix.md
-            └── plan-with-human.md
+├── commands/
+│   ├── monorail-run-bug.md       # /monorail-run-bug TICKET
+│   └── monorail-run-feature.md   # /monorail-run-feature TICKET
+└── agents/
+    ├── monorail-implement.md
+    ├── monorail-self-review.md
+    ├── monorail-fix-finding.md
+    ├── monorail-lint-test.md
+    ├── monorail-verify-acceptance.md
+    ├── monorail-open-pr.md
+    ├── monorail-ci-fix.md
+    └── monorail-plan-with-human.md
 ```
 
-Worktrees inherit this directory automatically (it's checked into git).
-When the daemon runs `claude -p "/monorail:run-bug RDM-5"` with cwd set
-to a worktree, Claude Code auto-discovers the plugin from
-`<worktree>/.claude/plugins/monorail/`.
+Worktrees inherit these files automatically (they're checked into git).
+When the daemon runs `claude -p "/monorail-run-bug RDM-5"` with cwd set
+to a worktree, Claude Code resolves the command from
+`<worktree>/.claude/commands/`.
+
+**Why commands, not skills.** The earlier draft of this spec specified
+a plugin layout under `.claude/plugins/monorail/skills/`. That requires
+either a user-level plugin install or a local marketplace registration
+— friction with no benefit, since the orchestrators are explicit-invoke
+only and have no auto-activation requirement nor bundled scripts. The
+direct `.claude/commands/` layout is the natural fit.
 
 **Linear MCP** is **not** committed. It's a per-developer / per-machine
 setup (official Linear MCP at `https://mcp.linear.app`). README will
@@ -266,7 +343,7 @@ expects Linear MCP tools to be available; if not, it errors fast.
 The daemon's Engine adapter calls:
 
 ```
-claude -p "/monorail:run-bug ACM-123" \
+claude -p "//monorail-run-bug ACM-123" \
        --permission-mode bypassPermissions \
        --output-format text
 ```
@@ -285,11 +362,23 @@ by a JSON object. Schema:
 {
   "outcome": "pr_opened" | "merged" | "escalated" | "failed",
   "phase":   "plan" | "implement" | "self_review" | "lint_test" |
-             "open_pr" | "ci_fix" | null,
+             "verify" | "open_pr" | "ci_fix" | null,
   "pr_url":  "https://github.com/..." | null,
   "summary": "human-readable single-paragraph summary",
   "reason":  "non-null only when outcome ∈ {escalated, failed}",
-  "attempts": { "self_review": 2, "lint_test": 1, "ci_fix": 0 }
+  "attempts": { "self_review": 2, "lint_test": 1, "ci_fix": 0 },
+  "verification": {
+    "all_satisfied": true,
+    "report": [
+      {
+        "criterion": "The README shall include sections: Overview, Installation, Usage.",
+        "satisfied": "yes" | "partial" | "no",
+        "code_evidence": "README.md lines 1-3 ...",
+        "test_evidence": "tests/readme_structure.rs:10 ...",
+        "score": 1.0
+      }
+    ]
+  }
 }
 ```
 
@@ -316,9 +405,10 @@ outcome. Exit code is a coarse guardrail (e.g., for shell-level CI).
 
 | Result | Daemon action |
 |---|---|
-| `pr_opened` | Set Linear state to `started`-or-keep, record PR URL, emit `pr_opened` event. If `auto_merge` label set, daemon initiates merge after CI green (separate from skill). |
+| `pr_opened` + `verification.all_satisfied=true` | Set Linear state to `started`-or-keep, record PR URL, emit `pr_opened` event. If `auto_merge` label set, daemon initiates merge after CI green; on green merge, sets Linear `completed`. |
+| `pr_opened` + `verification.all_satisfied=false` | PR is still opened (pre-PR loops succeeded), but daemon does NOT set Linear `completed` regardless of CI status. Posts Linear comment with the unsatisfied criteria. Human must resolve and approve. |
 | `merged` (v1: never) | Set Linear `completed`. |
-| `escalated` | Leave job in `Escalated` state, post Linear comment with `reason`, surface in TUI. Do NOT close PR (per original §8 — pre-PR escalations have no PR; CI-fix escalation keeps the PR open). |
+| `escalated` | Leave job in `Escalated` state, post Linear comment with `reason` (and the verification report if applicable), surface in TUI. Do NOT close PR (per original §8 — pre-PR escalations have no PR; CI-fix escalation keeps the PR open). |
 | `failed` | Treat as `escalated` with a failure-flavored comment. Distinguish for telemetry. |
 
 ### 6.5 Per-repo isolation enforcement (post-flight)
@@ -439,13 +529,14 @@ This pivot does not require rewriting Plans 1 and 2. The migration is
 incremental:
 
 1. **(this spec)** Land the architecture pivot in docs.
-2. **Plan 3** Build `.claude/plugins/monorail/` skeleton with
-   `monorail:run-bug` skill and the Type A subset of agents. Implement
-   `daemon-skill-contract` (`Engine::run_skill`). Run RDM-5 end-to-end
-   via the new path against the live API. Existing Rust pipeline stays
-   in place, unused but not deleted.
-3. **Plan 4** Add `monorail:run-feature` and `monorail-plan-with-human`.
-   Type B becomes available.
+2. **Plan 3** Build `.claude/commands/monorail-run-bug.md` and the
+   Type A agent set under `.claude/agents/` — including
+   `monorail-verify-acceptance` for the acceptance verification phase.
+   Implement `daemon-skill-contract` (`Engine::run_skill`). Run RDM-5
+   end-to-end via the new path against the live API. Existing Rust
+   pipeline stays in place, unused but not deleted.
+3. **Plan 4** Add `.claude/commands/monorail-run-feature.md` and
+   `monorail-plan-with-human` agent. Type B becomes available.
 4. **Plan 5** `pipeline-prune` + `engine-permission-policy`. Delete the
    old pipeline modules and prompt strings. Replace bypass-perm patch
    with a proper `.claude/settings.json` allowlist (or, if skills set
@@ -511,7 +602,7 @@ See [ROADMAP.md](../../ROADMAP.md). Concretely:
 |---|---|
 | §3.2 Adapter pattern | `Engine` trait shrinks to `run_skill` + (optional) `cancel`. Old methods (`implement`, `review`, `analyze_finding`, `apply_fix`, `fix_failure`) are removed when `pipeline-prune` lands. |
 | §6.3 Phase ↔ Linear status mapping | Daemon sets `started` and `completed` only. Per-phase mappings become a future feature (`phase-linear-extras`). |
-| §7.2 Self-review loop | Loop body moves to `monorail:run-bug` skill. Daemon no longer increments per-phase counters. |
+| §7.2 Self-review loop | Loop body moves to `/monorail-run-bug` skill. Daemon no longer increments per-phase counters. |
 | §7.3 Lint/test loop | Same as §7.2; loop moves to skill. |
 | §7.4 CI-fix loop | Same as §7.2; loop moves to skill. Daemon still observes terminal outcome. |
 | §10 Persistence and State | `repo_tasks.review_attempts`, `lint_test_attempts`, `ci_fix_attempts` become advisory. `Phase` enum's internal variants (`Implementing` etc.) become daemon-invisible. |
