@@ -55,3 +55,9 @@ target/
 *.db-journal
 *.db-wal
 .env
+.envrc
+
+# Claude Code: user-local config and dynamic worktree dirs (do not commit).
+# Plugin code under .claude/plugins/ IS tracked.
+.claude/settings.local.json
+.claude/worktrees/

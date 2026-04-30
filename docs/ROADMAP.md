@@ -23,6 +23,7 @@ Canonical list of plans, deferred items, and current state. Each completed plan 
 | Date | Decision | Spec |
 |---|---|---|
 | 2026-04-28 | **Small-daemon / skill-first.** Daemon shrinks to triage + state + worktree + multi-repo gating + Linear job-level sync. Two orchestrator skills (`monorail:run-bug`, `monorail:run-feature`) live in this repo's plugin and drive step agents. Loops (self-review, lint/test, ci-fix) move from Rust pipeline into skills. Skill ↔ Linear via official Linear MCP (user-configured). | `docs/superpowers/specs/2026-04-28-small-daemon-skill-first.md` |
+| 2026-04-30 | **Plugin → commands; acceptance verification.** Plugin layout (`.claude/plugins/monorail/`) dropped — required user-level install for zero gain on explicit-invoke orchestrators. Skills become commands at `.claude/commands/`, agents at `.claude/agents/`. Added `monorail-verify-acceptance` agent + verify phase in run-bug/run-feature. Tickets MUST include `## Acceptance Criteria` (EARS-style) for triage. Daemon gates Linear `Done` on `MONORAIL_RESULT.verification.all_satisfied=true`. Project-level EARS spec sync deferred as `project-spec-sync`. | same spec file (amended 2026-04-30) |
 
 This decision **amends sections of `2026-04-27-monorail-design.md`** — see that spec's §3.2, §6.3, §7.2-7.4, §10, §12, §13.1. The original design doc is not deleted; the pivot spec calls out which parts are superseded.
 
@@ -34,11 +35,14 @@ Each row is a unit of future work. The "depends on" column tracks roadmap IDs th
 
 | ID | Description | Spec § | Depends on | Notes |
 |---|---|---|---|---|
-| `monorail-plugin-skills` | `monorail:run-bug` and `monorail:run-feature` orchestrator skills under `.claude/plugins/monorail/skills/` | pivot spec §3, §4 | — | Two skills only; loops live inside them. |
-| `monorail-plugin-agents` | Step agents (`monorail-implement`, `-self-review`, `-fix-finding`, `-lint-test`, `-open-pr`, `-ci-fix`, `-plan-with-human`) under `.claude/plugins/monorail/agents/` | pivot spec §4, §5 | `monorail-plugin-skills` | Each agent is a single-step worker; orchestration stays in skill. |
-| `daemon-skill-contract` | Wire daemon to invoke a skill via `claude -p "/monorail:run-bug TICKET"` and parse `MONORAIL_RESULT:` JSON; replace per-phase Engine trait calls | pivot spec §6 | `monorail-plugin-skills` | Engine trait shrinks from 5 methods to 1-2. |
+| `monorail-orchestrator-commands` | `/monorail-run-bug` and `/monorail-run-feature` orchestrator commands under `.claude/commands/` | pivot spec §3, §5 | — | Two commands only; loops live inside them. (Was `monorail-plugin-skills`; renamed after dropping plugin layout — skills/plugin install added friction with no benefit.) |
+| `monorail-step-agents` | Step agents (`monorail-implement`, `-self-review`, `-fix-finding`, `-lint-test`, `-verify-acceptance`, `-open-pr`, `-ci-fix`, `-plan-with-human`) under `.claude/agents/` | pivot spec §4, §5 | `monorail-orchestrator-commands` | Each agent is a single-step worker; orchestration stays in command. |
+| `monorail-acceptance-verification` | `monorail-verify-acceptance` agent + verify phase in run-bug/run-feature commands; ticket-body `## Acceptance Criteria` (EARS) is required for triage; daemon gates Linear `Done` on `verification.all_satisfied=true` | pivot spec §3, §4.1, §4.2, §6.4 | `monorail-step-agents` | Three-layer trust: agent judgment + test_evidence + CI green. |
+| `monorail-ears-distill-command` | `/monorail-ears` slash command — distills prose specs/plans/ticket bodies into EARS bullets; auto-detects input (ticket key / file path / no-arg → latest spec or plan); writes back to ticket body via Linear MCP when input is a ticket | pivot spec §4.1 | `monorail-acceptance-verification` | Tracked as [RDM-6](https://linear.app/reedom/issue/RDM-6/build-monorail-ears-distill-command-auto-detect-input). v1: ticket-level write only; project-level write deferred to `project-spec-sync`. Project-doc discovery via CLAUDE.md hint + conventional-paths fallback. |
+| `daemon-skill-contract` | Wire daemon to invoke a command via `claude -p "/monorail-run-bug TICKET"` and parse `MONORAIL_RESULT:` JSON (including `verification` field); replace per-phase Engine trait calls | pivot spec §6 | `monorail-orchestrator-commands` | Engine trait shrinks from 5 methods to 1-2. |
 | `pipeline-prune` | Remove `src/pipeline/{self_review,lint_test,ci_fix}.rs`, per-phase counters in `repo_tasks`, prompt strings in `engine/claude_code.rs` | pivot spec §10 | `daemon-skill-contract` | Wait until skill route is reliable; current code stays as safety net. |
-| `type-b-planning` | Type B human planning loop, implemented as `monorail:run-feature` skill + `monorail-plan-with-human` agent | pivot spec §3, §4 | `monorail-plugin-skills` | Skill talks to Linear via MCP for the Q&A thread. |
+| `type-b-planning` | Type B human planning loop, implemented as `/monorail-run-feature` command + `monorail-plan-with-human` agent | pivot spec §3, §4 | `monorail-orchestrator-commands` | Command talks to Linear via MCP for the Q&A thread. |
+| `project-spec-sync` | Propagate ticket-level EARS criteria back to a canonical project EARS spec (e.g., `docs/spec/EARS.md`); detect drift between ticket changes and project-level spec | pivot spec §4.1 | `monorail-acceptance-verification` | Captured because the user's intent for ticket EARS is "these are deltas to a project-level spec". monorail v1 enforces ticket criteria only. |
 | `multi-repo` | One Job → many RepoTasks; parse multiple `Repo:` lines or DAG with `after:` / `wait_for:`; per-repo isolation hard contract | original §5.1, §7.5, §7.6 | `daemon-skill-contract` | The original cross-repo motivation. `RepoTask.anchors` field reserved. |
 | `auto-merge` | Consume `monorail:auto-merge` label after CI green | original §6.1 | `daemon-skill-contract` | Label parsed today; never acted on. Daemon decides merge after seeing skill outcome `pr_opened` + CI green. |
 | `worktree-cleanup` | Call `WtTool::remove` after merge / abandonment | — | `auto-merge` (some flows) | Trait method exists, never called. |
@@ -70,8 +74,8 @@ Order is by payoff and dependency. Reorder freely; each plan claims a number whe
 
 | # | Tentative scope | Roadmap IDs |
 |---|---|---|
-| Plan 3 | Skill scaffold + Type A end-to-end via skill | `monorail-plugin-skills` (run-bug only), `monorail-plugin-agents` (Type A subset), `daemon-skill-contract` |
-| Plan 4 | Type B planning via skill | `type-b-planning`, `monorail-plugin-skills` (run-feature) |
+| Plan 3 | Command scaffold + Type A end-to-end via command, with acceptance verification | `monorail-orchestrator-commands` (run-bug only), `monorail-step-agents` (Type A subset incl. `monorail-verify-acceptance`), `monorail-acceptance-verification`, `daemon-skill-contract` |
+| Plan 4 | Type B planning via command | `type-b-planning`, `monorail-orchestrator-commands` (run-feature) |
 | Plan 5 | Pipeline prune + permission policy | `pipeline-prune`, `engine-permission-policy` |
 | Plan 6 | Multi-repo + DAG + per-repo isolation | `multi-repo` (likely splits into 6a/6b) |
 | Plan 7 | Auto-merge + worktree cleanup | `auto-merge`, `worktree-cleanup` |
@@ -81,7 +85,7 @@ Order is by payoff and dependency. Reorder freely; each plan claims a number whe
 | Plan 11 | Container + concurrency | `container`, `concurrency` |
 | Plan 12+ | Engine alternatives, phase-linear-extras | `engine-alts`, `phase-linear-extras` |
 
-This supersedes the prior plan numbering. The architecture pivot consumed the previous "Plan 3 = Type B planning" slot — Type B now requires `monorail-plugin-skills` to land first, so it shifts to Plan 4.
+This supersedes the prior plan numbering. The architecture pivot consumed the previous "Plan 3 = Type B planning" slot — Type B now requires `monorail-orchestrator-commands` to land first, so it shifts to Plan 4. Acceptance verification was added to Plan 3 scope on 2026-04-30 (see "Architecture decisions").
 
 ---
 
