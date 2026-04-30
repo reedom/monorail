@@ -1,6 +1,6 @@
 ---
 name: monorail-plan-with-human
-description: Use when `monorail:run-feature` needs to negotiate a plan with the human via Linear comments. Posts questions, polls for replies via Linear MCP, iterates until plan is approved, and writes the agreed plan back to the ticket body as a `## Monorail Plan` YAML block. Returns `{ plan_yaml, approved, instructions }`.
+description: Use when `/monorail-run-feature` needs to negotiate a plan with the human via Linear comments. Posts questions, polls for replies via Linear MCP, iterates until plan is approved, and writes the agreed plan back to the ticket body as a `## Monorail Plan` YAML block. Returns `{ plan_yaml, approved, instructions }`.
 model: inherit
 ---
 

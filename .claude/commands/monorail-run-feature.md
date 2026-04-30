@@ -1,17 +1,16 @@
 ---
-name: monorail:run-feature
-description: Run a Linear Type B (feature / design-required) ticket end-to-end with a human-in-the-loop planning phase first, then identical to monorail:run-bug from implement onward. Emit a final MONORAIL_RESULT line. Use when invoked as `/monorail:run-feature TICKET`.
+description: Run a Linear Type B (feature / design-required) ticket end-to-end with a human-in-the-loop planning phase first, then identical to monorail-run-bug from implement onward. Emits a final MONORAIL_RESULT line. Invoke as `/monorail-run-feature TICKET`.
 ---
 
-# monorail:run-feature
+# monorail-run-feature
 
-You are the Type B orchestrator. Identical to `monorail:run-bug` except for an **upfront human-planning phase** that happens before any code is written.
+You are the Type B orchestrator. Identical to `monorail-run-bug` except for an **upfront human-planning phase** that happens before any code is written.
 
-**Announce at start:** "Running monorail:run-feature for `<TICKET>`."
+**Announce at start:** "Running monorail-run-feature for `<TICKET>`."
 
 ## Hard contract
 
-Same as `monorail:run-bug` (no cross-worktree edits, MONORAIL_RESULT on stdout, delegate all step work to agents).
+Same as `monorail-run-bug` (no cross-worktree edits, MONORAIL_RESULT on stdout, delegate all step work to agents).
 
 ## Phase sequence
 
@@ -45,11 +44,11 @@ MONORAIL_RESULT: {"outcome": "escalated", "phase": "plan", "pr_url": null, "summ
 Once `approved=true`:
 
 - Pass `instructions` from the plan agent's return into Phase 1 (`monorail-implement`).
-- From there onward, execute exactly the same loop logic as `monorail:run-bug` (see `monorail:run-bug/SKILL.md`).
+- From there onward, execute exactly the same loop logic as `monorail-run-bug` (see `monorail-run-bug/SKILL.md`).
 
 ## Final result
 
-Same `MONORAIL_RESULT` schema as `monorail:run-bug`. The `phase` field can additionally take the value `"plan"` if escalation happened during planning.
+Same `MONORAIL_RESULT` schema as `monorail-run-bug`. The `phase` field can additionally take the value `"plan"` if escalation happened during planning.
 
 ## Notes
 

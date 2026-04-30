@@ -1,13 +1,12 @@
 ---
-name: monorail:run-bug
-description: Run a Linear Type A (bug / small change) ticket end-to-end without human intervention. Orchestrates implement → self-review loop → lint/test loop → open PR → CI-fix loop. Emit a final MONORAIL_RESULT line for the daemon. Use when invoked as `/monorail:run-bug TICKET` (e.g., `/monorail:run-bug RDM-5`).
+description: Run a Linear Type A (bug / small change) ticket end-to-end without human intervention. Orchestrates implement → self-review loop → lint/test loop → open PR → CI-fix loop. Emits a final MONORAIL_RESULT line for the daemon. Invoke as `/monorail-run-bug TICKET` (e.g., `/monorail-run-bug RDM-5`).
 ---
 
-# monorail:run-bug
+# monorail-run-bug
 
 You are the Type A orchestrator. Your job is to drive a single Linear ticket end-to-end through the bug-fix pipeline and emit a structured terminal result the daemon can parse.
 
-**Announce at start:** "Running monorail:run-bug for `<TICKET>`."
+**Announce at start:** "Running monorail-run-bug for `<TICKET>`."
 
 ## Inputs
 

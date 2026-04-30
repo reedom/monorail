@@ -1,9 +1,0 @@
-{
-  "name": "monorail",
-  "version": "0.1.0",
-  "description": "Linear-driven autonomous development pipeline. Orchestrator skills (monorail:run-bug, monorail:run-feature) drive single-step agents to implement, review, test, open PR, and fix CI for a Linear ticket.",
-  "author": {
-    "name": "reedom",
-    "email": "tohru@reedom.com"
-  }
-}
