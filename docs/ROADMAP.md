@@ -43,6 +43,7 @@ Each row is a unit of future work. The "depends on" column tracks roadmap IDs th
 | `daemon-skill-contract` | Wire daemon to invoke a command via `claude -p "/monorail-run-bug TICKET"` and parse `MONORAIL_RESULT:` JSON (including `verification` field); replace per-phase Engine trait calls | pivot spec §6 | `monorail-orchestrator-commands` | Engine trait shrinks from 5 methods to 1-2. |
 | `pipeline-prune` | Remove `src/pipeline/{self_review,lint_test,ci_fix}.rs`, per-phase counters in `repo_tasks`, prompt strings in `engine/claude_code.rs` | pivot spec §10 | `daemon-skill-contract` | Wait until skill route is reliable; current code stays as safety net. |
 | `type-b-planning` | Type B human planning loop, implemented as `/monorail-run-feature` command + `monorail-plan-with-human` agent | pivot spec §3, §4 | `monorail-orchestrator-commands` | Command talks to Linear via MCP for the Q&A thread. |
+| `monorail-plan-command` | `/monorail-plan` standalone command wrapping `monorail-plan-with-human` — on-demand Q&A planning that writes `## Acceptance Criteria` + `## Monorail Plan` back to the ticket body without execution or Linear-state transitions | EARS spec §4 | `monorail-step-agents` | Spec-refinement pass; lets a human deliberately enter Q&A before daemon pickup or run-feature invocation. The `type/feature` label thereby means "permission to ask Q&A", not "must ask" — a fully-specified Type B ticket passes through the planning phase. |
 | `project-spec-sync` | Propagate ticket-level EARS criteria back to a canonical project EARS spec (e.g., `docs/spec/EARS.md`); detect drift between ticket changes and project-level spec | pivot spec §4.1 | `monorail-acceptance-verification` | Captured because the user's intent for ticket EARS is "these are deltas to a project-level spec". monorail v1 enforces ticket criteria only. |
 | `multi-repo` | One Job → many RepoTasks; parse multiple `Repo:` lines or DAG with `after:` / `wait_for:`; per-repo isolation hard contract | original §5.1, §7.5, §7.6 | `daemon-skill-contract` | The original cross-repo motivation. `RepoTask.anchors` field reserved. |
 | `auto-merge` | Consume `monorail:auto-merge` label after CI green | original §6.1 | `daemon-skill-contract` | Label parsed today; never acted on. Daemon decides merge after seeing skill outcome `pr_opened` + CI green. |
@@ -76,7 +77,7 @@ Order is by payoff and dependency. Reorder freely; each plan claims a number whe
 | # | Tentative scope | Roadmap IDs |
 |---|---|---|
 | Plan 3 | Command scaffold + Type A end-to-end via command, with acceptance verification | `monorail-orchestrator-commands` (run-bug only), `monorail-step-agents` (Type A subset incl. `monorail-verify-acceptance`), `monorail-acceptance-verification`, `daemon-skill-contract` |
-| Plan 4 | Type B planning via command | `type-b-planning`, `monorail-orchestrator-commands` (run-feature) |
+| Plan 4 | Type B planning via command | `type-b-planning`, `monorail-orchestrator-commands` (run-feature), `monorail-plan-command` |
 | Plan 5 | Pipeline prune + permission policy | `pipeline-prune`, `engine-permission-policy` |
 | Plan 6 | Multi-repo + DAG + per-repo isolation | `multi-repo` (likely splits into 6a/6b) |
 | Plan 7 | Auto-merge + worktree cleanup | `auto-merge`, `worktree-cleanup` |
