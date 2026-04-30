@@ -128,16 +128,32 @@ Now that triage has passed, materialize the per-ticket worktree. This phase is i
        c. worktree = the resulting path. You can confirm via `wt list`.
 3. From here on, every agent invocation passes `worktree` explicitly. Bash
    commands inside agents `cd` to that path or use `git -C "$worktree"`.
-4. If any of the above fails (no `wt` on PATH, no permission to create, etc.),
+4. **Transition Linear ticket to `In Progress`** (best-effort, soft-fail).
+   Under the small-daemon split, the skill owns `started`-type transitions
+   (picked-up here, `In Review` later in `monorail-open-pr`); the daemon
+   only handles merge/close → `Done`/`Canceled`. Steps:
+   - Fetch the ticket via Linear MCP `get_issue` for `team.id` and
+     current state (already cached from Phase 0; reuse if present).
+   - `list_issue_statuses(teamId)` and pick the first `type="started"`
+     state. If none exist, skip (some teams may not define one).
+   - Skip if the ticket is already in a `started`-typed state (no
+     downgrade between `In Progress` ↔ `In Review`) or in a `completed`/
+     `canceled` state (don't reopen).
+   - Otherwise, `save_issue` with `stateId = <target>`.
+   - On any Linear MCP error, log the error in the orchestrator's
+     summary but continue — do NOT abort the run. Triage already
+     confirmed the ticket exists; a transient state-write failure
+     should not block implementation.
+5. If any of steps 1-3 fail (no `wt` on PATH, no permission to create, etc.),
    emit:
 
        MONORAIL_RESULT: {"outcome": "failed", "phase": "setup", "pr_url": null,
          "summary": "...", "reason": "<actual error>", "attempts": {}, "verification": null}
 
-   and exit.
+   and exit. (Step 4 failures never abort — they're soft.)
 ```
 
-After Phase 1, `worktree` is the absolute path to the per-ticket worktree, and the branch in that worktree is `<TICKET>`.
+After Phase 1, `worktree` is the absolute path to the per-ticket worktree, the branch in that worktree is `<TICKET>`, and the Linear ticket is best-effort `In Progress`.
 
 ### Phase 2 — Implement
 

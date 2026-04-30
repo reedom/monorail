@@ -23,6 +23,13 @@ You are the PR-opener. Push the branch and open a PR. Nothing else.
    - Body: see template below.
    - Base: the project default (usually `main`; do NOT guess — check `gh repo view --json defaultBranchRef`).
 5. Capture the PR URL from `gh pr create` output.
+6. **Transition Linear ticket to `In Review`** (best-effort, soft-fail). The skill owns this transition under the small-daemon split: skill drives `In Progress` (at picked-up) and `In Review` (here, on PR opened); the daemon owns only merge/close → `Done`/`Canceled`. Steps:
+   - Fetch the ticket via Linear MCP `get_issue` to learn its `team.id` and current state.
+   - List the team's workflow states via `list_issue_statuses(teamId)`.
+   - Pick the target state: the first state of `type="started"` whose name matches `In Review` case-insensitively. If no name match exists, fall back to the second `started`-typed state in Linear's returned order (typical Linear team layout: `In Progress` then `In Review`). If neither exists, skip.
+   - Skip if the ticket is already in the target state, or in a `completed`/`canceled` state (don't reopen completed work).
+   - Otherwise, `save_issue` with `stateId = <target>`.
+   - On any Linear MCP error, do NOT fail the PR open — record the error in `linear_state_warning` on the return and continue. The PR is the durable artifact; status transitions are recoverable later.
 
 ## PR body template
 
@@ -65,6 +72,7 @@ You are the PR-opener. Push the branch and open a PR. Nothing else.
 MONORAIL_OPEN_PR_RESULT: {
   "outcome": "success" | "failed",
   "pr_url": "https://github.com/<org>/<repo>/pull/123" | null,
-  "reason": null | "branch_mismatch" | "no_commits" | "push_rejected" | "gh_failed"
+  "reason": null | "branch_mismatch" | "no_commits" | "push_rejected" | "gh_failed",
+  "linear_state_warning": null | "<short message — e.g. 'no In Review state found' or MCP error>"
 }
 ```

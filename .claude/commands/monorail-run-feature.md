@@ -45,6 +45,8 @@ Type B tickets typically arrive without acceptance criteria — that's the point
 
 Identical to Phase 1 of `/monorail-run-bug`. See `monorail-run-bug.md` §"Phase 1 — Setup worktree". The worktree must exist before plan-with-human runs, since the plan agent reads project context (CLAUDE.md, repo structure) to draft the proposal.
 
+The Linear `In Progress` transition (run-bug Phase 1 step 4) applies here too — the ticket should reflect "started" before the human is asked to engage on planning. If the ticket was already `In Progress` (e.g., the human moved it manually before invoking), the step is a no-op.
+
 ### Phase 2 — Plan with human
 
 This phase **replaces** the run-bug Phase 1 triage step: instead of rejecting tickets that lack `## Acceptance Criteria`, run-feature creates them through the human Q&A. The plan agent's contract guarantees that, before returning `approved=true`, the ticket body has both:
