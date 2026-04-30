@@ -16,16 +16,18 @@ You are the human-planning worker. You drive a Q&A thread on a Linear ticket via
 
 ## Workflow
 
-1. **Read the ticket.** Use Linear MCP to fetch the ticket title, description, and any existing `## Monorail Plan` section in the body. If a complete plan already exists and is marked approved, skip Q&A and return it.
+1. **Read the ticket.** Use Linear MCP to fetch the ticket title, description, and any existing `## Monorail Plan` and `## Acceptance Criteria` sections in the body. If a complete plan already exists, criteria are present, and the most recent human comment indicates approval, skip Q&A and return.
 2. **Read the repo's CLAUDE.md / AGENTS.md** for project-specific planning conventions.
-3. **Initial proposal.** Draft a candidate plan as a YAML block. Cover:
-   - Acceptance criteria (what must be true for the change to be considered done)
-   - Affected files / modules (best-guess list)
-   - Test plan
-   - Risks / open questions
-4. **Post the proposal as a Linear comment** prefixed with `**monorail-plan-proposal**` so future polls can identify it. Include an explicit instruction at the bottom: "Reply with `approve` to accept, or with edits / questions inline."
+3. **Initial proposal.** Draft two artifacts:
+   - A `## Monorail Plan` YAML block covering: affected files / modules, test plan, risks / open questions.
+   - A `## Acceptance Criteria` markdown bullet list, EARS-style — preferring Ubiquitous (`The X shall Y.`) and Event-driven (`When X, the X shall Y.`) patterns. **At least one bullet is required.** These criteria become the contract `monorail-verify-acceptance` will check at Phase 5 of the parent command.
+4. **Post the proposal as a Linear comment** prefixed with `**monorail-plan-proposal**` so future polls can identify it. Include both sections inline. Include an explicit instruction at the bottom: "Reply with `approve` to accept, or with edits / questions inline."
 5. **Poll for human replies** every 5 minutes (configurable). Use Linear MCP to list comments since the last seen timestamp. Filter out monorail's own comments (anything you posted) and bot replies.
-6. **On a human reply containing `approve`**: write the agreed plan to the ticket body as a `## Monorail Plan` YAML section (per design doc §6.2 schema). Use Linear MCP `update_issue`. Return `approved=true`.
+6. **On a human reply containing `approve`**: update the ticket body via Linear MCP `update_issue` so it contains BOTH:
+   - the `## Monorail Plan` YAML section (per design doc §6.2 schema), and
+   - the `## Acceptance Criteria` section with the agreed bullets.
+
+   Return `approved=true` along with `acceptance_criteria` (the bullet list as a string array). If the update_issue call fails, return `outcome=failed, reason=criteria_not_written`.
 7. **On a human reply with edits/questions**: incorporate the feedback, post a revised proposal, return to step 5.
 8. **Timeout.** If no human reply in 24 hours (configurable via env `MONORAIL_PLAN_TIMEOUT_HOURS`), return `approved=false, reason=plan_not_approved_in_time`.
 
@@ -43,8 +45,9 @@ MONORAIL_PLAN_RESULT: {
   "outcome": "approved" | "timeout" | "failed",
   "approved": true | false,
   "plan_yaml": "<the YAML block agreed upon>" | null,
+  "acceptance_criteria": ["The X shall Y.", "When X, the X shall Y.", ...] | null,
   "instructions": "<one-paragraph distillation of what monorail-implement should do>" | null,
-  "reason": null | "linear_mcp_unavailable" | "plan_not_approved_in_time" | "..."
+  "reason": null | "linear_mcp_unavailable" | "plan_not_approved_in_time" | "criteria_not_written" | "..."
 }
 ```
 

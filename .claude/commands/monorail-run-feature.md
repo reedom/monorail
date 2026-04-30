@@ -31,32 +31,38 @@ Identical to Phase 0 of `/monorail-run-bug`. See `monorail-run-bug.md` §"Phase 
 
 ### Phase 1 — Plan with human
 
-Invoke `monorail-plan-with-human` with `{ ticket: <TICKET> }`. This agent:
+This phase **replaces** the run-bug Phase 1 triage step: instead of rejecting tickets that lack `## Acceptance Criteria`, run-feature creates them through the human Q&A. The plan agent's contract guarantees that, before returning `approved=true`, the ticket body has both:
 
-- Posts initial questions as Linear comments via Linear MCP (`create_comment`).
-- Polls for human replies via Linear MCP (`list_comments` since timestamp).
-- Iterates until a plan is agreed upon.
-- Writes the agreed plan back to the Linear ticket body as a `## Monorail Plan` YAML section (per the original design doc §6.2).
-- Returns `{ plan_yaml: string, approved: bool, instructions: string }`.
+- a `## Monorail Plan` YAML block (per the original design doc §6.2), and
+- a `## Acceptance Criteria` section with EARS-style bullets.
 
-If `approved=false` after a configurable timeout (default 24 hours of no human reply), emit:
+Invoke `monorail-plan-with-human` with `{ ticket: <TICKET> }`. The agent:
+
+- Posts initial questions as Linear comments via Linear MCP.
+- Polls for human replies and iterates until a plan + criteria are agreed.
+- Writes both sections back to the Linear ticket body.
+- Returns `{ plan_yaml, approved, instructions, acceptance_criteria }`.
+
+If `approved=false` after a configurable timeout (default 24 hours of no human reply), or if the plan agent fails to write criteria for any reason, emit:
 
 ```json
-MONORAIL_RESULT: {"outcome": "escalated", "phase": "plan", "pr_url": null, "summary": "...", "reason": "plan_not_approved_in_time", "attempts": {}}
+MONORAIL_RESULT: {"outcome": "escalated", "phase": "plan", "pr_url": null,
+  "summary": "...", "reason": "plan_not_approved_in_time" | "criteria_not_written",
+  "attempts": {}, "verification": null}
 ```
 
 ### Phases 2–7
 
 Once `approved=true`:
 
-- Pass `instructions` from the plan agent's return into Phase 2 (`monorail-implement`).
-- From there onward, execute exactly the same loop logic as `/monorail-run-bug`'s Phases 1–6 (see `monorail-run-bug.md`), including the acceptance-verification step.
+- Pass `instructions` AND `acceptance_criteria` from the plan agent's return into Phase 2 (`monorail-implement`) — same input shape as run-bug Phase 2.
+- From there onward, execute exactly the same loop logic as `/monorail-run-bug`'s Phases 2–7 (see `monorail-run-bug.md`), including the acceptance-verification step at Phase 5.
 
-**Note on acceptance criteria for Type B.** The plan agent should ensure the agreed plan includes (or implies) acceptance criteria, and these are written to the ticket body's `## Acceptance Criteria` section as part of plan-approval. If the plan doesn't yield criteria the verify agent can check, escalate at the verification phase — same as Type A.
+**Why no separate triage in run-feature.** Type B tickets often start without acceptance criteria — that's the point of the planning phase. Plan-with-human IS the triage: it negotiates and writes the criteria. After Phase 1, criteria exist by construction; a separate triage step would be redundant.
 
 ## Final result
 
-Same `MONORAIL_RESULT` schema as `monorail-run-bug`. The `phase` field for this command can be `"setup"`, `"plan"`, or any of the run-bug phases.
+Same `MONORAIL_RESULT` schema as `monorail-run-bug`. The `phase` field for this command can be `"setup"`, `"plan"`, or any of the run-bug post-triage phases (`"implement" | "self_review" | "lint_test" | "verify" | "open_pr" | "ci_fix"`). Note that `"triage"` does not appear in run-feature outcomes — that gating role is performed by `"plan"`.
 
 ## Notes
 

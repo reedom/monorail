@@ -361,8 +361,8 @@ by a JSON object. Schema:
 ```json
 {
   "outcome": "pr_opened" | "merged" | "escalated" | "failed",
-  "phase":   "setup" | "plan" | "implement" | "self_review" | "lint_test" |
-             "verify" | "open_pr" | "ci_fix" | null,
+  "phase":   "setup" | "triage" | "plan" | "implement" | "self_review" |
+             "lint_test" | "verify" | "open_pr" | "ci_fix" | null,
   "pr_url":  "https://github.com/..." | null,
   "summary": "human-readable single-paragraph summary",
   "reason":  "non-null only when outcome ∈ {escalated, failed}",
