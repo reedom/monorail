@@ -15,16 +15,21 @@ Same as `monorail-run-bug` (no cross-worktree edits, MONORAIL_RESULT on stdout, 
 ## Phase sequence
 
 ```
-0. plan-with-human              (agent: monorail-plan-with-human)
-1. implement                    (agent: monorail-implement, with the agreed plan as instructions)
-2. self-review loop, max 5
-3. lint/test loop, max 5
-4. acceptance verification      (agent: monorail-verify-acceptance)
-5. open PR
-6. CI-fix loop, max 3
+0. setup worktree               (inline — same as /monorail-run-bug Phase 0)
+1. plan-with-human              (agent: monorail-plan-with-human)
+2. implement                    (agent: monorail-implement, with the agreed plan as instructions)
+3. self-review loop, max 5
+4. lint/test loop, max 5
+5. acceptance verification      (agent: monorail-verify-acceptance)
+6. open PR
+7. CI-fix loop, max 3
 ```
 
-### Phase 0 — Plan with human
+### Phase 0 — Setup worktree
+
+Identical to Phase 0 of `/monorail-run-bug`. See `monorail-run-bug.md` §"Phase 0 — Setup worktree". The worktree must exist before plan-with-human runs, since the plan agent reads project context (CLAUDE.md, repo structure) to draft the proposal.
+
+### Phase 1 — Plan with human
 
 Invoke `monorail-plan-with-human` with `{ ticket: <TICKET> }`. This agent:
 
@@ -40,18 +45,18 @@ If `approved=false` after a configurable timeout (default 24 hours of no human r
 MONORAIL_RESULT: {"outcome": "escalated", "phase": "plan", "pr_url": null, "summary": "...", "reason": "plan_not_approved_in_time", "attempts": {}}
 ```
 
-### Phases 1–6
+### Phases 2–7
 
 Once `approved=true`:
 
-- Pass `instructions` from the plan agent's return into Phase 1 (`monorail-implement`).
-- From there onward, execute exactly the same loop logic as `/monorail-run-bug` (see `monorail-run-bug.md`), including the Phase 4 acceptance-verification step.
+- Pass `instructions` from the plan agent's return into Phase 2 (`monorail-implement`).
+- From there onward, execute exactly the same loop logic as `/monorail-run-bug`'s Phases 1–6 (see `monorail-run-bug.md`), including the acceptance-verification step.
 
-**Note on acceptance criteria for Type B.** The plan agent should ensure the agreed plan includes (or implies) acceptance criteria, and these are written to the ticket body's `## Acceptance Criteria` section as part of plan-approval. If the plan doesn't yield criteria the verify agent can check, escalate at Phase 4 — same as Type A.
+**Note on acceptance criteria for Type B.** The plan agent should ensure the agreed plan includes (or implies) acceptance criteria, and these are written to the ticket body's `## Acceptance Criteria` section as part of plan-approval. If the plan doesn't yield criteria the verify agent can check, escalate at the verification phase — same as Type A.
 
 ## Final result
 
-Same `MONORAIL_RESULT` schema as `monorail-run-bug`. The `phase` field can additionally take the value `"plan"` if escalation happened during planning.
+Same `MONORAIL_RESULT` schema as `monorail-run-bug`. The `phase` field for this command can be `"setup"`, `"plan"`, or any of the run-bug phases.
 
 ## Notes
 

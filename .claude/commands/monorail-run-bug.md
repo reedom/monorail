@@ -11,18 +11,19 @@ You are the Type A orchestrator. Your job is to drive a single Linear ticket end
 ## Inputs
 
 - `<TICKET>` — Linear ticket key (e.g., `RDM-5`), passed as the slash-command argument
-- Current working directory — must be the per-ticket worktree (e.g., `~/ghq/github.com/<org>/<repo>.RDM-5`). The daemon sets this; if cwd is not a worktree of `<branch>=<TICKET>`, abort with `outcome=failed`.
+- Current working directory — when invoked by the daemon, this is already the per-ticket worktree. When invoked manually (`/monorail-run-bug TICKET` from any cwd inside the repo), Phase 0 below ensures a worktree exists.
 - Environment — `LINEAR_API_KEY` may be set (used by Linear MCP if invoked); `GITHUB_TOKEN` consumed by `gh`.
 
 ## Hard contract
 
-1. You MUST NOT edit files outside the current worktree. The daemon enforces this with a post-flight `git status` check across all worktrees in the Job; any cross-repo leak overrides your outcome to `escalated` with reason `CrossRepoLeak`.
+1. You MUST NOT edit files outside the resolved per-ticket worktree (the `worktree` value established by Phase 0). The daemon (when present) enforces this with a post-flight `git status` check across all worktrees in the Job; any cross-repo leak overrides your outcome to `escalated` with reason `CrossRepoLeak`.
 2. You MUST emit exactly one final line starting with `MONORAIL_RESULT: ` followed by a JSON object (schema below) before exiting.
 3. Each step is performed by a dedicated agent. You never do step work directly — you delegate via the Task tool and act on the agent's structured return.
 
 ## Phase sequence
 
 ```
+0. setup worktree                    (inline; uses wt + git)
 1. implement                         (agent: monorail-implement)
 2. self-review loop, max 5 attempts  (agents: monorail-self-review + monorail-fix-finding)
 3. lint/test loop, max 5 attempts    (agent: monorail-lint-test)
@@ -30,6 +31,40 @@ You are the Type A orchestrator. Your job is to drive a single Linear ticket end
 5. open PR                           (agent: monorail-open-pr)
 6. CI-fix loop, max 3 attempts       (agent: monorail-ci-fix)
 ```
+
+### Phase 0 — Setup worktree
+
+Resolve the per-ticket worktree path. This phase is idempotent: existing worktrees are reused.
+
+```
+1. current_branch = `git rev-parse --abbrev-ref HEAD`
+2. If current_branch == <TICKET>:
+       worktree = `git rev-parse --show-toplevel`
+       (We're already in the right worktree — daemon-prepared, or a manual rerun.)
+   Else:
+       a. Find the base repo path. Run `git worktree list --porcelain` from cwd
+          and pick the entry whose path is the "main" worktree (the one whose
+          branch is the repo's default — usually `main` or `master`).
+          - If `git worktree list` shows only entries inside this current
+            worktree's tree, fall back to `ghq list -p <org>/<repo>` once you
+            know the org/repo (derive from `git remote get-url origin`).
+       b. Run: `wt -C <base_repo_path> switch --create <TICKET>`
+          - This creates the worktree if absent or switches to it if present.
+          - The wt convention places it at `<base_parent>/<repo>.<TICKET>`
+            (e.g., `~/ghq/github.com/reedom/monorail.RDM-5`).
+       c. worktree = the resulting path. You can confirm via `wt list`.
+3. From here on, every agent invocation passes `worktree` explicitly. Bash
+   commands inside agents `cd` to that path or use `git -C "$worktree"`.
+4. If any of the above fails (no `wt` on PATH, no permission to create, etc.),
+   emit:
+
+       MONORAIL_RESULT: {"outcome": "failed", "phase": "setup", "pr_url": null,
+         "summary": "...", "reason": "<actual error>", "attempts": {}, "verification": null}
+
+   and exit.
+```
+
+After Phase 0, `worktree` is the absolute path to the per-ticket worktree, and the branch in that worktree is `<TICKET>`.
 
 ### Phase 1 — Implement
 
@@ -128,7 +163,7 @@ MONORAIL_RESULT: {"outcome": "...", "phase": "...", "pr_url": "...", "summary": 
 | Field | Type | Notes |
 |---|---|---|
 | `outcome` | `"pr_opened" \| "merged" \| "escalated" \| "failed"` | `"merged"` is reserved for future auto-merge; v1 always returns `"pr_opened"` on success. |
-| `phase` | `"plan" \| "implement" \| "self_review" \| "lint_test" \| "verify" \| "open_pr" \| "ci_fix" \| null` | The phase the orchestrator was in when it terminated. `null` when outcome is `pr_opened` and CI-fix loop also ran. |
+| `phase` | `"setup" \| "plan" \| "implement" \| "self_review" \| "lint_test" \| "verify" \| "open_pr" \| "ci_fix" \| null` | The phase the orchestrator was in when it terminated. `null` when outcome is `pr_opened` and CI-fix loop also ran. |
 | `pr_url` | string \| null | Set after Phase 5 succeeds. |
 | `summary` | string | One paragraph human-readable summary. |
 | `reason` | string \| null | Non-null only when outcome ∈ {`escalated`, `failed`}. |
