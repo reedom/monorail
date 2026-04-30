@@ -162,23 +162,30 @@ see §5.)
    3. If any fix was applied, repeat from (1). If none applied, exit
       loop. If 5 iterations reached with fixes still being applied,
       escalate.
-3. **Lint/test loop (max 5)** — invoke `monorail-lint-test` agent. Agent
+3. **Acceptance review (gate)** — invoke `monorail-verify-acceptance`
+   with `mode=review`. The agent judges qualitatively whether the
+   diff plausibly addresses each criterion (code logic only;
+   test_evidence is informational, not required). If any criterion has
+   no `code_evidence`, escalate with `phase=verify`,
+   `reason=implementation_misses_criteria`. **Fails fast before
+   self-review and lint-test cycles.**
+4. **Self-review loop (max 5)** — invoke `monorail-self-review` agent
+   to find code-quality findings, then `monorail-fix-finding` per
+   actionable finding. Loop until no actionable fix is made (or 5).
+5. **Lint/test loop (max 5)** — invoke `monorail-lint-test` agent. Agent
    discovers verify command, runs it, fixes failures, returns
    `green | red`. If red after 5 attempts, escalate.
-4. **Acceptance verification** — invoke `monorail-verify-acceptance` agent.
-   Agent reads the ticket's `## Acceptance Criteria` section (EARS-style
-   bullets), the diff, and added/modified tests, and judges each
-   criterion as `satisfied | partial | unsatisfied` with both a code
-   evidence line and a test evidence line. If any criterion is
-   `unsatisfied` (or `partial` for a strict policy), escalate with
-   `phase=verify`, `reason=criteria_unmet`, and the report attached.
-   This is the trust boundary that lets the daemon transition Linear to
-   Done — see §6.5 for how the result is consumed.
-5. **Open PR** — invoke `monorail-open-pr` agent. Returns `{pr_url}`.
-   The agent embeds the verification report (criterion list with
-   evidence) into the PR description so human reviewers see the same
-   acceptance check the daemon will use.
-6. **CI fix loop (max 3)** — invoke `monorail-ci-fix` agent. Polls
+6. **Acceptance verification (final)** — invoke `monorail-verify-acceptance`
+   with `mode=verify`. Strict pass: every criterion must have BOTH
+   `code_evidence` AND `test_evidence`. If `all_satisfied=false`,
+   escalate with `phase=verify`, `reason=criteria_unmet`. This is the
+   trust boundary that lets the daemon transition Linear to Done — see
+   §6.5 for how the result is consumed.
+7. **Open PR** — invoke `monorail-open-pr` agent. Returns `{pr_url}`.
+   The agent embeds the final verification report (Phase 6) into the
+   PR description so human reviewers see the same acceptance check
+   the daemon will use.
+8. **CI fix loop (max 3)** — invoke `monorail-ci-fix` agent. Polls
    GitHub Actions until checks finish, fixes failures, pushes. If
    checks fail after 3 attempts, escalate (PR remains open per original
    §8 contract).
@@ -218,7 +225,7 @@ result the skill can act on.
 | `monorail-lint-test` | worktree path, prior failure log (optional) | `{ outcome: "green"|"red", log: string }` | Read, Edit, Write, Bash |
 | `monorail-open-pr` | worktree path, ticket key, summary | `{ pr_url: string }` | Bash(`gh pr create`, `git push`) |
 | `monorail-ci-fix` | worktree path, ticket key, pr_url | `{ outcome: "green"|"red", attempts: int }` | Read, Edit, Write, Bash(`gh`) |
-| `monorail-verify-acceptance` | worktree path, ticket key | `{ all_satisfied: bool, report: [...] }` | Read, Grep, Bash(`git diff`), Linear MCP (read-only) |
+| `monorail-verify-acceptance` | worktree path, ticket key, `mode: "review" \| "verify"` | `{ mode, all_satisfied: bool, report: [...] }` | Read, Grep, Bash(`git diff`), Linear MCP (read-only) |
 | `monorail-plan-with-human` | ticket key | `{ plan_yaml: string, approved: bool }` | Read, Bash, Linear MCP tools |
 
 Agents do **not** know about each other. The skill is the only coordinator.
@@ -254,8 +261,8 @@ row is implemented, ticket criteria already use a compatible syntax.
 
 ### 4.2 Verification rubric
 
-`monorail-verify-acceptance` produces a report with one entry per
-criterion:
+`monorail-verify-acceptance` runs in one of two modes (`review` or
+`verify`) and produces a report with one entry per criterion:
 
 ```json
 {
@@ -267,16 +274,37 @@ criterion:
 }
 ```
 
-Both `code_evidence` and `test_evidence` MUST be non-empty for a
-`satisfied="yes"` verdict. A criterion satisfied only by code with no
-corresponding test is `satisfied="partial"` — the orchestrator skill
-treats this as a failure unless an explicit `monorail:no-test-required`
-ticket label is set.
+**`review` mode** runs after implement and before self-review/lint-test.
+It asks "does the diff plausibly address each criterion?" — purely a
+qualitative judgment on the implementation logic. `code_evidence` is
+required; `test_evidence` is recorded if found, but its absence does
+NOT fail the criterion. `all_satisfied=true` requires every criterion
+has at least `code_evidence`. The point of this mode is **fail-fast**:
+if the implementation clearly doesn't address a criterion, escalate
+before burning self-review and lint-test cycles.
 
-This two-key requirement is the trust mechanism: agent judgment can be
-wrong, but if the agent claims a test exists at a given location, CI
-will independently verify whether that test passes. Three-layer check:
-agent says satisfied → test exists → CI green.
+**`verify` mode** runs after lint-test, before open-pr. It is the
+rigorous final pass: both `code_evidence` AND `test_evidence` MUST be
+non-empty for `satisfied="yes"`. A criterion satisfied only by code is
+`satisfied="partial"` — treated as failure unless the ticket has the
+explicit `monorail:no-test-required` label. `all_satisfied=true`
+requires every criterion `="yes"`.
+
+Two passes ask different questions and tune for different cost /
+strictness trade-offs:
+
+| | `review` (Phase 3 in run-bug, 4 in run-feature) | `verify` (Phase 6 in run-bug, 7 in run-feature) |
+|---|---|---|
+| Question | Does the diff plausibly address each criterion? | Is each criterion satisfied with concrete code AND test evidence? |
+| code_evidence | required | required |
+| test_evidence | informational | required |
+| Cost | one MCP call + diff scan | same |
+| Used by daemon | escalation reason on fail | gates Linear → Done |
+
+The two-key requirement (in `verify` mode) is the trust mechanism:
+agent judgment can be wrong, but if the agent claims a test exists at
+a given location, CI independently verifies whether that test passes.
+Three-layer check: agent says satisfied → test exists → CI green.
 
 ### 4.3 Verify-cmd discovery
 

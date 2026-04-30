@@ -15,15 +15,16 @@ Same as `monorail-run-bug` (no cross-worktree edits, MONORAIL_RESULT on stdout, 
 ## Phase sequence
 
 ```
-0. precheck — Linear MCP + ticket    (inline; no worktree yet)
-1. setup worktree                    (inline; same as /monorail-run-bug Phase 1)
-2. plan-with-human                   (agent: monorail-plan-with-human)
-3. implement                         (agent: monorail-implement, with the agreed plan as instructions)
-4. self-review loop, max 5
-5. lint/test loop, max 5
-6. acceptance verification           (agent: monorail-verify-acceptance)
-7. open PR
-8. CI-fix loop, max 3
+0. precheck — Linear MCP + ticket      (inline; no worktree yet)
+1. setup worktree                      (inline; same as /monorail-run-bug Phase 1)
+2. plan-with-human                     (agent: monorail-plan-with-human)
+3. implement                           (agent: monorail-implement)
+4. acceptance review (gate)            (agent: monorail-verify-acceptance, mode=review)
+5. self-review loop, max 5             (agents: monorail-self-review + monorail-fix-finding)
+6. lint/test loop, max 5               (agent: monorail-lint-test)
+7. acceptance verification (final)     (agent: monorail-verify-acceptance, mode=verify)
+8. open PR                             (agent: monorail-open-pr)
+9. CI-fix loop, max 3                  (agent: monorail-ci-fix)
 ```
 
 ### Phase 0 — Precheck
@@ -66,14 +67,17 @@ MONORAIL_RESULT: {"outcome": "escalated", "phase": "plan", "pr_url": null,
   "attempts": {}, "verification": null}
 ```
 
-### Phases 3–8
+### Phases 3–9
 
 Once `approved=true`:
 
-- Pass `instructions` AND `acceptance_criteria` from the plan agent's return into Phase 3 (`monorail-implement`) — same input shape as run-bug Phase 2.
-- From there onward, execute exactly the same loop logic as `/monorail-run-bug`'s Phases 2–7 (see `monorail-run-bug.md`), including the acceptance-verification step.
+- Pass `instructions` AND `acceptance_criteria` from the plan agent's return into Phase 3 (`monorail-implement`) — same input shape as run-bug.
+- From there onward, execute the same loop logic as `/monorail-run-bug`'s Phases 2–8: implement → review-mode acceptance gate (Phase 4) → self-review → lint-test → verify-mode final acceptance check → open PR → CI-fix.
+- Both acceptance phases call `monorail-verify-acceptance`; only the `mode` differs (`review` for the gate, `verify` for the final).
 
 **Why precheck-then-setup-then-plan.** Type B tickets often start without acceptance criteria, so a strict triage like run-bug's would always fail here. The precheck (Phase 0) is cheap — just "Linear MCP works, ticket exists" — and runs without a worktree, so a network-blocked or wrong-ticket session fails before any filesystem effect. Plan-with-human (Phase 2) IS the criteria-creating step: by the time it returns approved, the ticket body has both `## Monorail Plan` and `## Acceptance Criteria` sections, and `acceptance_criteria` is captured for downstream phases.
+
+**Why two acceptance passes.** Same as run-bug — the review-mode gate fails fast if implementation misses a criterion (saves self-review and lint-test cost), and the final verify-mode check is the rigorous Done gate.
 
 ## Final result
 

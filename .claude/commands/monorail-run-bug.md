@@ -23,23 +23,31 @@ You are the Type A orchestrator. Your job is to drive a single Linear ticket end
 ## Phase sequence
 
 ```
-0. triage — confirm criteria exist   (inline; Linear MCP read; NO worktree yet)
-1. setup worktree                    (inline; uses wt + git)
-2. implement                         (agent: monorail-implement)
-3. self-review loop, max 5 attempts  (agents: monorail-self-review + monorail-fix-finding)
-4. lint/test loop, max 5 attempts    (agent: monorail-lint-test)
-5. acceptance verification           (agent: monorail-verify-acceptance)
-6. open PR                           (agent: monorail-open-pr)
-7. CI-fix loop, max 3 attempts       (agent: monorail-ci-fix)
+0. triage — confirm criteria exist     (inline; Linear MCP read; NO worktree yet)
+1. setup worktree                      (inline; uses wt + git)
+2. implement                           (agent: monorail-implement)
+3. acceptance review (gate)            (agent: monorail-verify-acceptance, mode=review)
+4. self-review loop, max 5 attempts    (agents: monorail-self-review + monorail-fix-finding)
+5. lint/test loop, max 5 attempts      (agent: monorail-lint-test)
+6. acceptance verification (final)     (agent: monorail-verify-acceptance, mode=verify)
+7. open PR                             (agent: monorail-open-pr)
+8. CI-fix loop, max 3 attempts         (agent: monorail-ci-fix)
 ```
 
 **Why triage runs first.** Acceptance criteria are the basis on which
-Phase 5 judges whether the change is Done. If a ticket has none, there
-is no objective basis to start work. Triage uses only Linear MCP — no
-worktree needed — so it's the cheapest possible failure point. Failing
-here means no worktree is created, no compute is spent, and the user
-gets a clear Linear comment explaining what to add. Setup, implement,
-and everything after only happen once we know the work is well-formed.
+Phase 6 ultimately judges Done. If a ticket has none, there is no
+objective basis to start. Triage uses only Linear MCP — no worktree —
+so it's the cheapest possible failure point.
+
+**Why two acceptance passes.** Phase 3 ("review") is a fail-fast gate
+right after implement: it asks "does the diff plausibly address each
+criterion?" using qualitative judgment. Tests may not be verified yet,
+so test_evidence is informational at this point. If the implementation
+clearly misses a criterion, escalate before burning compute on
+self-review and lint-test. Phase 6 ("verify") is the rigorous final
+check: both code_evidence AND test_evidence are required, and the
+result is what gates Linear → Done. The two passes ask different
+questions and are tuned for different cost/strictness trade-offs.
 
 ### Phase 0 — Triage: confirm acceptance criteria exist
 
@@ -141,7 +149,24 @@ Invoke `monorail-implement` with:
 
 If the agent returns failure (cannot proceed, missing info, etc.), emit `outcome=escalated`, `phase=implement`, `reason=<agent's reason>` and exit.
 
-### Phase 3 — Self-review loop
+### Phase 3 — Acceptance review (gate)
+
+Invoke `monorail-verify-acceptance` with `{ worktree, ticket, mode: "review" }`. This is the **fail-fast gate**: the implementation just landed, and we want to know whether it plausibly addresses every acceptance criterion before spending compute on self-review and lint-test.
+
+The agent runs in `review` mode (lenient about test_evidence — tests may not be verified yet). Its return shape is the same as Phase 6's, but `all_satisfied=true` only requires every criterion to have `code_evidence` (i.e., the diff plausibly addresses it). Test gaps are recorded but do not fail this phase.
+
+```
+result = invoke monorail-verify-acceptance { worktree, ticket, mode: "review" }
+if result.outcome == "failed":
+    emit outcome=failed, phase=verify, reason=<agent's reason>; exit
+if not result.all_satisfied:
+    emit outcome=escalated, phase=verify, reason=implementation_misses_criteria,
+         attaching result.report to MONORAIL_RESULT.verification; exit
+```
+
+If `all_satisfied=true`, store this report (call it `review_report`) and proceed. The implementation is on track; refining its quality (Phase 4) and confirming tests pass (Phase 5) is now worth doing.
+
+### Phase 4 — Self-review loop
 
 ```
 attempts = 0
@@ -161,7 +186,7 @@ if attempts == 5 and actionable_fix_made_in_last_iteration:
     escalate(phase="self_review", reason="self_review_max_attempts")
 ```
 
-### Phase 4 — Lint/test loop
+### Phase 5 — Lint/test loop
 
 ```
 attempts = 0
@@ -175,33 +200,28 @@ if outcome != "green":
     escalate(phase="lint_test", reason="lint_test_unfixed_after_5")
 ```
 
-### Phase 5 — Acceptance verification
+### Phase 6 — Acceptance verification (final)
 
-Invoke `monorail-verify-acceptance` with `{ worktree, ticket }`. The agent reads the Linear ticket's `## Acceptance Criteria` (EARS bullets), the diff, and the added/modified tests, and returns:
+Invoke `monorail-verify-acceptance` with `{ worktree, ticket, mode: "verify" }`. This is the rigorous final check, post-self-review and post-lint-test: the diff is final, tests are passing, and we now require both `code_evidence` AND `test_evidence` for every criterion.
 
 ```
-{
-  "all_satisfied": bool,
-  "report": [
-    { "criterion": "...", "satisfied": "yes"|"partial"|"no",
-      "code_evidence": "...", "test_evidence": "...", "score": 0.0..1.0 }
-  ]
-}
+result = invoke monorail-verify-acceptance { worktree, ticket, mode: "verify" }
+if result.outcome == "failed":
+    emit outcome=failed, phase=verify, reason=<agent's reason>; exit
+if not result.all_satisfied:
+    emit outcome=escalated, phase=verify, reason=criteria_unmet,
+         attaching result.report; exit
 ```
 
-If `outcome=failed` (e.g., Linear MCP unavailable, no `## Acceptance Criteria` section), emit `outcome=failed`, `phase=verify`, `reason=<agent's reason>`.
+If `all_satisfied=true`, store this `verification_report` for use by Phase 7 (it goes into the PR body and the final MONORAIL_RESULT).
 
-If `all_satisfied=false`, emit `outcome=escalated`, `phase=verify`, `reason=criteria_unmet`, attaching the report. The skill exits before opening a PR — so unverifiable changes never reach review surface.
+### Phase 7 — Open PR
 
-If `all_satisfied=true`, store the report and proceed.
-
-### Phase 6 — Open PR
-
-Invoke `monorail-open-pr` with `{ worktree, ticket, summary, verification_report }` where `summary` is a one-paragraph synthesis of what implement + fixes accomplished, and `verification_report` is the report from Phase 5 (the open-pr agent embeds it into the PR body so reviewers see the same acceptance check the daemon will use). Returns `{ pr_url }`.
+Invoke `monorail-open-pr` with `{ worktree, ticket, summary, verification_report }` where `summary` is a one-paragraph synthesis of what implement + fixes accomplished, and `verification_report` is the report from Phase 6 (the open-pr agent embeds it into the PR body so reviewers see the same acceptance check the daemon will use). Returns `{ pr_url }`.
 
 If the agent fails (push rejected, gh error, etc.), emit `outcome=failed`, `phase=open_pr`.
 
-### Phase 7 — CI-fix loop
+### Phase 8 — CI-fix loop
 
 ```
 attempts = 0
@@ -230,11 +250,11 @@ MONORAIL_RESULT: {"outcome": "...", "phase": "...", "pr_url": "...", "summary": 
 |---|---|---|
 | `outcome` | `"pr_opened" \| "merged" \| "escalated" \| "failed"` | `"merged"` is reserved for future auto-merge; v1 always returns `"pr_opened"` on success. |
 | `phase` | `"setup" \| "triage" \| "plan" \| "implement" \| "self_review" \| "lint_test" \| "verify" \| "open_pr" \| "ci_fix" \| null` | The phase the orchestrator was in when it terminated. `null` when outcome is `pr_opened` and CI-fix loop also ran. |
-| `pr_url` | string \| null | Set after Phase 6 succeeds. |
+| `pr_url` | string \| null | Set after Phase 7 succeeds. |
 | `summary` | string | One paragraph human-readable summary. |
 | `reason` | string \| null | Non-null only when outcome ∈ {`escalated`, `failed`}. |
 | `attempts` | object | Loop counts from each phase. |
-| `verification` | object \| null | Full report from `monorail-verify-acceptance` (Phase 5). `null` if Phase 5 didn't run (e.g., escalated earlier). Daemon uses `verification.all_satisfied` to gate Linear `Done`. |
+| `verification` | object \| null | Full report from `monorail-verify-acceptance`. When emitted from Phase 6 (final, mode=verify), `all_satisfied=true` is what gates Linear `Done`. When emitted from a Phase 3 escalation (mode=review), the `mode` field shows it's the gate report. `null` only if neither phase ran (e.g., escalated at triage / setup / implement). |
 
 ### Exit code
 
