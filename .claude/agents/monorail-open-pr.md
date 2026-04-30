@@ -11,6 +11,7 @@ You are the PR-opener. Push the branch and open a PR. Nothing else.
 - `worktree`: cwd
 - `ticket`: Linear ticket key (= branch name, e.g., `RDM-5`)
 - `summary`: one-paragraph synthesis of what the implement + fix loops accomplished
+- `verification_report`: the report object returned by `monorail-verify-acceptance` (criterion list with `code_evidence` / `test_evidence` / `satisfied` per item). Embedded into the PR body so reviewers see the same acceptance check the daemon will use.
 
 ## Workflow
 
@@ -34,9 +35,18 @@ You are the PR-opener. Push the branch and open a PR. Nothing else.
 
 [<ticket>](https://linear.app/<workspace>/issue/<ticket>)
 
+## Acceptance verification
+
+(table built from `verification_report`; one row per criterion)
+
+| Criterion | Satisfied | Code evidence | Test evidence |
+|---|---|---|---|
+| <criterion verbatim> | yes / partial / no | <file:line> | <test file::test name> |
+
 ## Test plan
 
-- [ ] verify command (run by monorail-lint-test): green
+- [x] verify command (run by monorail-lint-test): green
+- [x] acceptance criteria verified by monorail-verify-acceptance
 - [ ] manual verification: TBD by reviewer
 ```
 

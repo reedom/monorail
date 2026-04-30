@@ -19,8 +19,9 @@ Same as `monorail-run-bug` (no cross-worktree edits, MONORAIL_RESULT on stdout, 
 1. implement                    (agent: monorail-implement, with the agreed plan as instructions)
 2. self-review loop, max 5
 3. lint/test loop, max 5
-4. open PR
-5. CI-fix loop, max 3
+4. acceptance verification      (agent: monorail-verify-acceptance)
+5. open PR
+6. CI-fix loop, max 3
 ```
 
 ### Phase 0 — Plan with human
@@ -39,12 +40,14 @@ If `approved=false` after a configurable timeout (default 24 hours of no human r
 MONORAIL_RESULT: {"outcome": "escalated", "phase": "plan", "pr_url": null, "summary": "...", "reason": "plan_not_approved_in_time", "attempts": {}}
 ```
 
-### Phases 1–5
+### Phases 1–6
 
 Once `approved=true`:
 
 - Pass `instructions` from the plan agent's return into Phase 1 (`monorail-implement`).
-- From there onward, execute exactly the same loop logic as `monorail-run-bug` (see `monorail-run-bug/SKILL.md`).
+- From there onward, execute exactly the same loop logic as `/monorail-run-bug` (see `monorail-run-bug.md`), including the Phase 4 acceptance-verification step.
+
+**Note on acceptance criteria for Type B.** The plan agent should ensure the agreed plan includes (or implies) acceptance criteria, and these are written to the ticket body's `## Acceptance Criteria` section as part of plan-approval. If the plan doesn't yield criteria the verify agent can check, escalate at Phase 4 — same as Type A.
 
 ## Final result
 

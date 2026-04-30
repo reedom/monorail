@@ -26,8 +26,9 @@ You are the Type A orchestrator. Your job is to drive a single Linear ticket end
 1. implement                         (agent: monorail-implement)
 2. self-review loop, max 5 attempts  (agents: monorail-self-review + monorail-fix-finding)
 3. lint/test loop, max 5 attempts    (agent: monorail-lint-test)
-4. open PR                           (agent: monorail-open-pr)
-5. CI-fix loop, max 3 attempts       (agent: monorail-ci-fix)
+4. acceptance verification           (agent: monorail-verify-acceptance)
+5. open PR                           (agent: monorail-open-pr)
+6. CI-fix loop, max 3 attempts       (agent: monorail-ci-fix)
 ```
 
 ### Phase 1 — Implement
@@ -73,13 +74,33 @@ if outcome != "green":
     escalate(phase="lint_test", reason="lint_test_unfixed_after_5")
 ```
 
-### Phase 4 — Open PR
+### Phase 4 — Acceptance verification
 
-Invoke `monorail-open-pr` with `{ worktree, ticket, summary }` where `summary` is a one-paragraph synthesis of what implement + fixes accomplished. Returns `{ pr_url }`.
+Invoke `monorail-verify-acceptance` with `{ worktree, ticket }`. The agent reads the Linear ticket's `## Acceptance Criteria` (EARS bullets), the diff, and the added/modified tests, and returns:
+
+```
+{
+  "all_satisfied": bool,
+  "report": [
+    { "criterion": "...", "satisfied": "yes"|"partial"|"no",
+      "code_evidence": "...", "test_evidence": "...", "score": 0.0..1.0 }
+  ]
+}
+```
+
+If `outcome=failed` (e.g., Linear MCP unavailable, no `## Acceptance Criteria` section), emit `outcome=failed`, `phase=verify`, `reason=<agent's reason>`.
+
+If `all_satisfied=false`, emit `outcome=escalated`, `phase=verify`, `reason=criteria_unmet`, attaching the report. The skill exits before opening a PR — so unverifiable changes never reach review surface.
+
+If `all_satisfied=true`, store the report and proceed.
+
+### Phase 5 — Open PR
+
+Invoke `monorail-open-pr` with `{ worktree, ticket, summary, verification_report }` where `summary` is a one-paragraph synthesis of what implement + fixes accomplished, and `verification_report` is the report from Phase 4 (the open-pr agent embeds it into the PR body so reviewers see the same acceptance check the daemon will use). Returns `{ pr_url }`.
 
 If the agent fails (push rejected, gh error, etc.), emit `outcome=failed`, `phase=open_pr`.
 
-### Phase 5 — CI-fix loop
+### Phase 6 — CI-fix loop
 
 ```
 attempts = 0
@@ -99,19 +120,20 @@ if outcome != "green":
 After the phases conclude (success or escalation), emit on stdout exactly one line:
 
 ```
-MONORAIL_RESULT: {"outcome": "...", "phase": "...", "pr_url": "...", "summary": "...", "reason": null, "attempts": {"self_review": N, "lint_test": N, "ci_fix": N}}
+MONORAIL_RESULT: {"outcome": "...", "phase": "...", "pr_url": "...", "summary": "...", "reason": null, "attempts": {"self_review": N, "lint_test": N, "ci_fix": N}, "verification": {...}}
 ```
 
 ### Schema
 
 | Field | Type | Notes |
 |---|---|---|
-| `outcome` | `"pr_opened" \| "merged" \| "escalated" \| "failed"` | `"merged"` is reserved for future auto-merge; v1 skill always returns `"pr_opened"` on success. |
-| `phase` | `"plan" \| "implement" \| "self_review" \| "lint_test" \| "open_pr" \| "ci_fix" \| null` | The phase the skill was in when it terminated. `null` when outcome is `pr_opened` and CI-fix loop also ran. |
-| `pr_url` | string \| null | Set after Phase 4 succeeds. |
+| `outcome` | `"pr_opened" \| "merged" \| "escalated" \| "failed"` | `"merged"` is reserved for future auto-merge; v1 always returns `"pr_opened"` on success. |
+| `phase` | `"plan" \| "implement" \| "self_review" \| "lint_test" \| "verify" \| "open_pr" \| "ci_fix" \| null` | The phase the orchestrator was in when it terminated. `null` when outcome is `pr_opened` and CI-fix loop also ran. |
+| `pr_url` | string \| null | Set after Phase 5 succeeds. |
 | `summary` | string | One paragraph human-readable summary. |
 | `reason` | string \| null | Non-null only when outcome ∈ {`escalated`, `failed`}. |
 | `attempts` | object | Loop counts from each phase. |
+| `verification` | object \| null | Full report from `monorail-verify-acceptance` (Phase 4). `null` if Phase 4 didn't run (e.g., escalated earlier). Daemon uses `verification.all_satisfied` to gate Linear `Done`. |
 
 ### Exit code
 
