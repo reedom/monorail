@@ -15,21 +15,36 @@ Same as `monorail-run-bug` (no cross-worktree edits, MONORAIL_RESULT on stdout, 
 ## Phase sequence
 
 ```
-0. setup worktree               (inline — same as /monorail-run-bug Phase 0)
-1. plan-with-human              (agent: monorail-plan-with-human)
-2. implement                    (agent: monorail-implement, with the agreed plan as instructions)
-3. self-review loop, max 5
-4. lint/test loop, max 5
-5. acceptance verification      (agent: monorail-verify-acceptance)
-6. open PR
-7. CI-fix loop, max 3
+0. precheck — Linear MCP + ticket    (inline; no worktree yet)
+1. setup worktree                    (inline; same as /monorail-run-bug Phase 1)
+2. plan-with-human                   (agent: monorail-plan-with-human)
+3. implement                         (agent: monorail-implement, with the agreed plan as instructions)
+4. self-review loop, max 5
+5. lint/test loop, max 5
+6. acceptance verification           (agent: monorail-verify-acceptance)
+7. open PR
+8. CI-fix loop, max 3
 ```
 
-### Phase 0 — Setup worktree
+### Phase 0 — Precheck
 
-Identical to Phase 0 of `/monorail-run-bug`. See `monorail-run-bug.md` §"Phase 0 — Setup worktree". The worktree must exist before plan-with-human runs, since the plan agent reads project context (CLAUDE.md, repo structure) to draft the proposal.
+Type B tickets typically arrive without acceptance criteria — that's the point of the planning phase. So the cheap precheck here is narrower than run-bug's triage: it only confirms that Linear MCP is reachable and the ticket itself can be fetched. The plan-with-human phase will write criteria as part of approval.
 
-### Phase 1 — Plan with human
+```
+1. If Linear MCP is not available, emit:
+       MONORAIL_RESULT: {"outcome": "failed", "phase": "triage",
+         "reason": "linear_mcp_unavailable", ...}
+       exit. Do NOT create a worktree.
+2. Fetch the ticket. If fetch errors (auth, network, not found), emit
+   `phase=triage, reason=ticket_fetch_failed: <error>` and exit.
+3. Cache the ticket body for plan-with-human to use as starting context.
+```
+
+### Phase 1 — Setup worktree
+
+Identical to Phase 1 of `/monorail-run-bug`. See `monorail-run-bug.md` §"Phase 1 — Setup worktree". The worktree must exist before plan-with-human runs, since the plan agent reads project context (CLAUDE.md, repo structure) to draft the proposal.
+
+### Phase 2 — Plan with human
 
 This phase **replaces** the run-bug Phase 1 triage step: instead of rejecting tickets that lack `## Acceptance Criteria`, run-feature creates them through the human Q&A. The plan agent's contract guarantees that, before returning `approved=true`, the ticket body has both:
 
@@ -51,14 +66,14 @@ MONORAIL_RESULT: {"outcome": "escalated", "phase": "plan", "pr_url": null,
   "attempts": {}, "verification": null}
 ```
 
-### Phases 2–7
+### Phases 3–8
 
 Once `approved=true`:
 
-- Pass `instructions` AND `acceptance_criteria` from the plan agent's return into Phase 2 (`monorail-implement`) — same input shape as run-bug Phase 2.
-- From there onward, execute exactly the same loop logic as `/monorail-run-bug`'s Phases 2–7 (see `monorail-run-bug.md`), including the acceptance-verification step at Phase 5.
+- Pass `instructions` AND `acceptance_criteria` from the plan agent's return into Phase 3 (`monorail-implement`) — same input shape as run-bug Phase 2.
+- From there onward, execute exactly the same loop logic as `/monorail-run-bug`'s Phases 2–7 (see `monorail-run-bug.md`), including the acceptance-verification step.
 
-**Why no separate triage in run-feature.** Type B tickets often start without acceptance criteria — that's the point of the planning phase. Plan-with-human IS the triage: it negotiates and writes the criteria. After Phase 1, criteria exist by construction; a separate triage step would be redundant.
+**Why precheck-then-setup-then-plan.** Type B tickets often start without acceptance criteria, so a strict triage like run-bug's would always fail here. The precheck (Phase 0) is cheap — just "Linear MCP works, ticket exists" — and runs without a worktree, so a network-blocked or wrong-ticket session fails before any filesystem effect. Plan-with-human (Phase 2) IS the criteria-creating step: by the time it returns approved, the ticket body has both `## Monorail Plan` and `## Acceptance Criteria` sections, and `acceptance_criteria` is captured for downstream phases.
 
 ## Final result
 

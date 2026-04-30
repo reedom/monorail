@@ -23,8 +23,8 @@ You are the Type A orchestrator. Your job is to drive a single Linear ticket end
 ## Phase sequence
 
 ```
-0. setup worktree                    (inline; uses wt + git)
-1. triage — confirm criteria exist   (inline; Linear MCP read)
+0. triage — confirm criteria exist   (inline; Linear MCP read; NO worktree yet)
+1. setup worktree                    (inline; uses wt + git)
 2. implement                         (agent: monorail-implement)
 3. self-review loop, max 5 attempts  (agents: monorail-self-review + monorail-fix-finding)
 4. lint/test loop, max 5 attempts    (agent: monorail-lint-test)
@@ -33,50 +33,17 @@ You are the Type A orchestrator. Your job is to drive a single Linear ticket end
 7. CI-fix loop, max 3 attempts       (agent: monorail-ci-fix)
 ```
 
-**Why triage runs before implement.** Acceptance criteria are the basis on
-which Phase 5 judges whether the change is Done. If a ticket has none,
-there is no objective basis to start work — every later phase would
-either fabricate criteria or fail anyway. Confirming criteria exist
-*before* burning compute on implementation is the cheapest possible
-failure mode.
+**Why triage runs first.** Acceptance criteria are the basis on which
+Phase 5 judges whether the change is Done. If a ticket has none, there
+is no objective basis to start work. Triage uses only Linear MCP — no
+worktree needed — so it's the cheapest possible failure point. Failing
+here means no worktree is created, no compute is spent, and the user
+gets a clear Linear comment explaining what to add. Setup, implement,
+and everything after only happen once we know the work is well-formed.
 
-### Phase 0 — Setup worktree
+### Phase 0 — Triage: confirm acceptance criteria exist
 
-Resolve the per-ticket worktree path. This phase is idempotent: existing worktrees are reused.
-
-```
-1. current_branch = `git rev-parse --abbrev-ref HEAD`
-2. If current_branch == <TICKET>:
-       worktree = `git rev-parse --show-toplevel`
-       (We're already in the right worktree — daemon-prepared, or a manual rerun.)
-   Else:
-       a. Find the base repo path. Run `git worktree list --porcelain` from cwd
-          and pick the entry whose path is the "main" worktree (the one whose
-          branch is the repo's default — usually `main` or `master`).
-          - If `git worktree list` shows only entries inside this current
-            worktree's tree, fall back to `ghq list -p <org>/<repo>` once you
-            know the org/repo (derive from `git remote get-url origin`).
-       b. Run: `wt -C <base_repo_path> switch --create <TICKET>`
-          - This creates the worktree if absent or switches to it if present.
-          - The wt convention places it at `<base_parent>/<repo>.<TICKET>`
-            (e.g., `~/ghq/github.com/reedom/monorail.RDM-5`).
-       c. worktree = the resulting path. You can confirm via `wt list`.
-3. From here on, every agent invocation passes `worktree` explicitly. Bash
-   commands inside agents `cd` to that path or use `git -C "$worktree"`.
-4. If any of the above fails (no `wt` on PATH, no permission to create, etc.),
-   emit:
-
-       MONORAIL_RESULT: {"outcome": "failed", "phase": "setup", "pr_url": null,
-         "summary": "...", "reason": "<actual error>", "attempts": {}, "verification": null}
-
-   and exit.
-```
-
-After Phase 0, `worktree` is the absolute path to the per-ticket worktree, and the branch in that worktree is `<TICKET>`.
-
-### Phase 1 — Triage: confirm acceptance criteria exist
-
-Fetch the ticket via Linear MCP and verify the body contains an `## Acceptance Criteria` section with at least one bullet. This is a **hard precondition** — without it there is no basis for Phase 5 to judge Done, and every minute spent in Phases 2–4 is wasted.
+**Do this BEFORE creating any worktree.** Triage uses only Linear MCP; no filesystem changes happen here. Failing fast at this point means no worktree is left behind, no compute is wasted, and the user gets a clear comment in Linear telling them what to add.
 
 ```
 1. If Linear MCP is not available in this session:
@@ -121,23 +88,56 @@ Fetch the ticket via Linear MCP and verify the body contains an `## Acceptance C
                 "summary": "ticket missing acceptance criteria",
                 "reason": "needs_acceptance_criteria",
                 "attempts": {}, "verification": null}
-       c. Exit.
+       c. Exit. **Do NOT proceed to Phase 1 (worktree setup).**
 
 5. If the section is present, capture the bullets verbatim into a
-   variable `acceptance_criteria` for use in later phases (Phase 5
-   re-fetches independently, but the implementor agent in Phase 2
-   benefits from seeing the criteria up front).
+   variable `acceptance_criteria`, and the ticket title + description
+   into `instructions`, for use in later phases.
 ```
 
-After Phase 1, you have a verified set of `acceptance_criteria`. Proceed to Phase 2.
+After Phase 0, you have a verified set of `acceptance_criteria` and the ticket body cached in memory. Proceed to Phase 1.
+
+### Phase 1 — Setup worktree
+
+Now that triage has passed, materialize the per-ticket worktree. This phase is idempotent: existing worktrees are reused.
+
+```
+1. current_branch = `git rev-parse --abbrev-ref HEAD`
+2. If current_branch == <TICKET>:
+       worktree = `git rev-parse --show-toplevel`
+       (We're already in the right worktree — daemon-prepared, or a manual rerun.)
+   Else:
+       a. Find the base repo path. Run `git worktree list --porcelain` from cwd
+          and pick the entry whose path is the "main" worktree (the one whose
+          branch is the repo's default — usually `main` or `master`).
+          - If `git worktree list` shows only entries inside this current
+            worktree's tree, fall back to `ghq list -p <org>/<repo>` once you
+            know the org/repo (derive from `git remote get-url origin`).
+       b. Run: `wt -C <base_repo_path> switch --create <TICKET>`
+          - This creates the worktree if absent or switches to it if present.
+          - The wt convention places it at `<base_parent>/<repo>.<TICKET>`
+            (e.g., `~/ghq/github.com/reedom/monorail.RDM-5`).
+       c. worktree = the resulting path. You can confirm via `wt list`.
+3. From here on, every agent invocation passes `worktree` explicitly. Bash
+   commands inside agents `cd` to that path or use `git -C "$worktree"`.
+4. If any of the above fails (no `wt` on PATH, no permission to create, etc.),
+   emit:
+
+       MONORAIL_RESULT: {"outcome": "failed", "phase": "setup", "pr_url": null,
+         "summary": "...", "reason": "<actual error>", "attempts": {}, "verification": null}
+
+   and exit.
+```
+
+After Phase 1, `worktree` is the absolute path to the per-ticket worktree, and the branch in that worktree is `<TICKET>`.
 
 ### Phase 2 — Implement
 
 Invoke `monorail-implement` with:
-- `worktree`: the path resolved in Phase 0
+- `worktree`: the path resolved in Phase 1
 - `ticket`: `<TICKET>`
-- `instructions`: the Linear ticket title + description (already fetched in Phase 1; reuse that body)
-- `acceptance_criteria`: the bullets captured in Phase 1, so the implementor knows what success looks like before writing a line of code
+- `instructions`: the Linear ticket title + description (already fetched in Phase 0; reuse that body)
+- `acceptance_criteria`: the bullets captured in Phase 0, so the implementor knows what success looks like before writing a line of code
 
 If the agent returns failure (cannot proceed, missing info, etc.), emit `outcome=escalated`, `phase=implement`, `reason=<agent's reason>` and exit.
 
